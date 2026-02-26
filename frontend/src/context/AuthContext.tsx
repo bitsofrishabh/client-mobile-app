@@ -1,13 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authAPI } from '../services/api';
+import { authAPI, profileAPI } from '../services/api';
 
 interface User {
   id: string;
   email: string;
   name: string;
-  role: string;
-  created_at: string;
+  age?: number;
+  gender?: string;
+  height_cm?: number;
+  weight_kg?: number;
+  goal_weight_kg?: number;
+  activity_level?: string;
+  bmi?: number;
+  daily_calorie_goal?: number;
+  coach_code?: string;
+  package_id?: string;
 }
 
 interface AuthContextType {
@@ -16,8 +24,20 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string, invite_code: string) => Promise<void>;
+  register: (data: {
+    name: string;
+    email: string;
+    password: string;
+    age?: number;
+    gender?: string;
+    height_cm?: number;
+    weight_kg?: number;
+    goal_weight_kg?: number;
+    activity_level?: string;
+  }) => Promise<void>;
+  updateProfile: (data: Partial<User>) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,15 +55,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const storedToken = await AsyncStorage.getItem('auth_token');
       const storedUser = await AsyncStorage.getItem('user');
-      
+
       if (storedToken && storedUser) {
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
-        
+
         // Verify token is still valid
         try {
           const userData = await authAPI.me();
           setUser(userData);
+          await AsyncStorage.setItem('user', JSON.stringify(userData));
         } catch (error) {
           // Token invalid, clear storage
           await logout();
@@ -64,12 +85,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(response.user);
   };
 
-  const register = async (name: string, email: string, password: string, invite_code: string) => {
-    const response = await authAPI.register({ name, email, password, invite_code });
+  const register = async (data: {
+    name: string;
+    email: string;
+    password: string;
+    age?: number;
+    gender?: string;
+    height_cm?: number;
+    weight_kg?: number;
+    goal_weight_kg?: number;
+    activity_level?: string;
+  }) => {
+    const response = await authAPI.register(data);
     await AsyncStorage.setItem('auth_token', response.access_token);
     await AsyncStorage.setItem('user', JSON.stringify(response.user));
     setToken(response.access_token);
     setUser(response.user);
+  };
+
+  const updateProfile = async (data: Partial<User>) => {
+    const response = await profileAPI.update(data);
+    // Refresh user data
+    const userData = await authAPI.me();
+    setUser(userData);
+    await AsyncStorage.setItem('user', JSON.stringify(userData));
+  };
+
+  const refreshUser = async () => {
+    try {
+      const userData = await authAPI.me();
+      setUser(userData);
+      await AsyncStorage.setItem('user', JSON.stringify(userData));
+    } catch (error) {
+      console.error('Error refreshing user:', error);
+    }
   };
 
   const logout = async () => {
@@ -88,7 +137,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!token && !!user,
         login,
         register,
+        updateProfile,
         logout,
+        refreshUser,
       }}
     >
       {children}
