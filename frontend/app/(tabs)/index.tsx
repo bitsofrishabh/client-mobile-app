@@ -7,42 +7,43 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../src/context/AuthContext';
-import { clientAPI } from '../../src/services/api';
+import { dashboardAPI, waterAPI } from '../../src/services/api';
 import { Card } from '../../src/components/Card';
-import { GradientButton } from '../../src/components/GradientButton';
 import { Colors, Gradients, Spacing, BorderRadius, Shadow } from '../../src/constants/theme';
 
+const { width } = Dimensions.get('window');
+
 interface DashboardData {
-  has_profile: boolean;
-  client?: {
+  user: {
     name: string;
-    current_weight: number;
-    goal_weight: number;
-    initial_weight: number;
-    adherence_rate: number;
+    bmi: number | null;
+    current_weight: number | null;
+    goal_weight: number | null;
+    daily_calorie_goal: number | null;
   };
-  today?: {
+  today: {
     date: string;
-    checkin_completed: boolean;
-    adherence_score: number;
+    water_glasses: number;
+    sleep_hours: number;
+    steps: number;
+    workout_done: boolean;
+    workout_mins: number;
+    calories_consumed: number;
+    calories_burned: number;
   };
-  diet_plan?: {
-    name: string;
-    daily_calories: number | null;
-    meals_count: number;
-  };
-  progress?: {
-    recent_weights: Array<{ weight_kg: number; recorded_date: string }>;
-    streak_days: number;
+  progress: {
+    recent_weights: Array<{ date: string; weight: number }>;
+    weekly_workouts: number;
     weight_change: number;
   };
-  unread_messages: number;
+  has_coach: boolean;
 }
 
 export default function Home() {
@@ -54,7 +55,7 @@ export default function Home() {
 
   const fetchDashboard = async () => {
     try {
-      const data = await clientAPI.getDashboard();
+      const data = await dashboardAPI.get();
       setDashboard(data);
     } catch (error) {
       console.error('Error fetching dashboard:', error);
@@ -73,11 +74,27 @@ export default function Home() {
     fetchDashboard();
   }, []);
 
+  const addWater = async () => {
+    try {
+      await waterAPI.log(1);
+      fetchDashboard();
+    } catch (error) {
+      console.error('Error logging water:', error);
+    }
+  };
+
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good Morning';
     if (hour < 18) return 'Good Afternoon';
     return 'Good Evening';
+  };
+
+  const getBMICategory = (bmi: number) => {
+    if (bmi < 18.5) return { label: 'Underweight', color: '#FFB347' };
+    if (bmi < 25) return { label: 'Normal', color: Colors.success };
+    if (bmi < 30) return { label: 'Overweight', color: '#FFB347' };
+    return { label: 'Obese', color: Colors.error };
   };
 
   if (loading) {
@@ -90,24 +107,12 @@ export default function Home() {
     );
   }
 
-  if (!dashboard?.has_profile) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.noProfileContainer}>
-          <Ionicons name="person-add-outline" size={80} color={Colors.textLight} />
-          <Text style={styles.noProfileTitle}>No Profile Linked</Text>
-          <Text style={styles.noProfileText}>
-            Please ask your coach to add you as a client. Make sure you registered with the correct invite code.
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const weightProgress = dashboard.client
-    ? Math.min(100, Math.max(0, ((dashboard.client.initial_weight - dashboard.client.current_weight) / 
-        (dashboard.client.initial_weight - dashboard.client.goal_weight)) * 100))
-    : 0;
+  const bmi = dashboard?.user?.bmi || user?.bmi;
+  const bmiCategory = bmi ? getBMICategory(bmi) : null;
+  const calorieGoal = dashboard?.user?.daily_calorie_goal || 2000;
+  const caloriesConsumed = dashboard?.today?.calories_consumed || 0;
+  const caloriesBurned = dashboard?.today?.calories_burned || 0;
+  const netCalories = caloriesConsumed - caloriesBurned;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -115,171 +120,216 @@ export default function Home() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Colors.primary}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
         {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>{getGreeting()},</Text>
-            <Text style={styles.userName}>{dashboard.client?.name || user?.name}</Text>
+            <Text style={styles.userName}>{dashboard?.user?.name || user?.name}</Text>
           </View>
           <TouchableOpacity style={styles.notificationButton}>
             <Ionicons name="notifications-outline" size={24} color={Colors.textDark} />
-            {dashboard.unread_messages > 0 && (
-              <View style={styles.notificationBadge}>
-                <Text style={styles.notificationBadgeText}>{dashboard.unread_messages}</Text>
-              </View>
-            )}
           </TouchableOpacity>
         </View>
 
-        {/* Weight Progress Card */}
+        {/* BMI Card */}
         <LinearGradient
           colors={Gradients.primary}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={styles.progressCard}
+          style={styles.bmiCard}
         >
-          <View style={styles.progressCardContent}>
-            <View style={styles.progressInfo}>
-              <Text style={styles.progressTitle}>Weight Progress</Text>
-              <Text style={styles.progressValue}>
-                {dashboard.client?.current_weight} kg
-              </Text>
-              <Text style={styles.progressGoal}>
-                Goal: {dashboard.client?.goal_weight} kg
-              </Text>
+          <View style={styles.bmiContent}>
+            <View style={styles.bmiInfo}>
+              <Text style={styles.bmiLabel}>BMI (Body Mass Index)</Text>
+              {bmiCategory && (
+                <View style={[styles.bmiBadge, { backgroundColor: bmiCategory.color }]}>
+                  <Text style={styles.bmiBadgeText}>{bmiCategory.label}</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.progressCircle}>
-              <Text style={styles.progressPercent}>
-                {weightProgress.toFixed(0)}%
-              </Text>
+            <View style={styles.bmiCircle}>
+              <Text style={styles.bmiValue}>{bmi?.toFixed(1) || '--'}</Text>
             </View>
           </View>
-          <TouchableOpacity
-            style={styles.viewMoreButton}
-            onPress={() => router.push('/(tabs)/progress')}
-          >
+          <TouchableOpacity style={styles.viewMoreButton} onPress={() => router.push('/(tabs)/progress')}>
             <Text style={styles.viewMoreText}>View More</Text>
           </TouchableOpacity>
         </LinearGradient>
 
-        {/* Today's Target Section */}
+        {/* Today Target */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Today Target</Text>
-          <TouchableOpacity
-            style={styles.checkButton}
-            onPress={() => router.push('/check-in')}
-          >
-            <LinearGradient
-              colors={Gradients.primary}
-              style={styles.checkButtonGradient}
-            >
+          <TouchableOpacity style={styles.checkButton} onPress={() => router.push('/check-in')}>
+            <LinearGradient colors={Gradients.primary} style={styles.checkButtonGradient}>
               <Text style={styles.checkButtonText}>Check</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
 
-        {/* Status Cards */}
-        <View style={styles.statusGrid}>
-          <Card style={styles.statusCard}>
-            <View style={styles.statusIconContainer}>
-              <Ionicons name="flame" size={24} color={Colors.secondary} />
+        {/* Activity Status Cards */}
+        <View style={styles.activityGrid}>
+          {/* Water Intake */}
+          <Card style={styles.activityCard}>
+            <View style={styles.activityHeader}>
+              <Ionicons name="water" size={20} color="#5DCCFC" />
+              <Text style={styles.activityTitle}>Water Intake</Text>
             </View>
-            <Text style={styles.statusValue}>{dashboard.progress?.streak_days || 0}</Text>
-            <Text style={styles.statusLabel}>Day Streak</Text>
+            <Text style={styles.activityValue}>
+              <Text style={{ color: '#5DCCFC' }}>{dashboard?.today?.water_glasses || 0}</Text>
+              <Text style={styles.activityUnit}>/8 glasses</Text>
+            </Text>
+            <View style={styles.waterProgress}>
+              {[...Array(8)].map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.waterDot,
+                    i < (dashboard?.today?.water_glasses || 0) && styles.waterDotFilled,
+                  ]}
+                />
+              ))}
+            </View>
+            <TouchableOpacity style={styles.addWaterButton} onPress={addWater}>
+              <Ionicons name="add" size={20} color={Colors.primary} />
+            </TouchableOpacity>
           </Card>
 
-          <Card style={styles.statusCard}>
-            <View style={styles.statusIconContainer}>
-              <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
+          {/* Sleep */}
+          <Card style={styles.activityCard}>
+            <View style={styles.activityHeader}>
+              <Ionicons name="moon" size={20} color="#9B8AFB" />
+              <Text style={styles.activityTitle}>Sleep</Text>
             </View>
-            <Text style={styles.statusValue}>
-              {dashboard.today?.adherence_score || 0}%
+            <Text style={styles.activityValue}>
+              <Text style={{ color: '#9B8AFB' }}>{dashboard?.today?.sleep_hours || 0}</Text>
+              <Text style={styles.activityUnit}> hours</Text>
             </Text>
-            <Text style={styles.statusLabel}>Today's Adherence</Text>
+            <TouchableOpacity
+              style={styles.logButton}
+              onPress={() => router.push('/sleep-tracker')}
+            >
+              <Text style={styles.logButtonText}>Log Sleep</Text>
+            </TouchableOpacity>
           </Card>
 
-          <Card style={styles.statusCard}>
-            <View style={styles.statusIconContainer}>
-              <Ionicons name="trending-down" size={24} color={Colors.primary} />
+          {/* Calories */}
+          <Card style={styles.activityCard}>
+            <View style={styles.activityHeader}>
+              <Ionicons name="flame" size={20} color="#FF9B5A" />
+              <Text style={styles.activityTitle}>Calories</Text>
             </View>
-            <Text style={styles.statusValue}>
-              {Math.abs(dashboard.progress?.weight_change || 0).toFixed(1)} kg
+            <Text style={styles.activityValue}>
+              <Text style={{ color: '#FF9B5A' }}>{netCalories}</Text>
+              <Text style={styles.activityUnit}>/{calorieGoal} kCal</Text>
             </Text>
-            <Text style={styles.statusLabel}>Weight Lost</Text>
+            <View style={styles.calorieDetails}>
+              <Text style={styles.calorieText}>Eaten: {caloriesConsumed}</Text>
+              <Text style={styles.calorieText}>Burned: {caloriesBurned}</Text>
+            </View>
           </Card>
 
-          <Card style={styles.statusCard}>
-            <View style={styles.statusIconContainer}>
-              <Ionicons name="restaurant" size={24} color={Colors.warning} />
+          {/* Steps */}
+          <Card style={styles.activityCard}>
+            <View style={styles.activityHeader}>
+              <Ionicons name="footsteps" size={20} color="#42D742" />
+              <Text style={styles.activityTitle}>Steps</Text>
             </View>
-            <Text style={styles.statusValue}>
-              {dashboard.diet_plan?.meals_count || 0}
+            <Text style={styles.activityValue}>
+              <Text style={{ color: '#42D742' }}>{dashboard?.today?.steps || 0}</Text>
+              <Text style={styles.activityUnit}>/10k</Text>
             </Text>
-            <Text style={styles.statusLabel}>Meals Today</Text>
+            <View style={styles.progressBar}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${Math.min(100, ((dashboard?.today?.steps || 0) / 10000) * 100)}%`,
+                    backgroundColor: '#42D742',
+                  },
+                ]}
+              />
+            </View>
           </Card>
         </View>
 
-        {/* Check-in Status */}
-        <Card style={styles.checkinCard} variant="elevated">
-          <View style={styles.checkinContent}>
-            <View style={styles.checkinInfo}>
-              <Ionicons
-                name={dashboard.today?.checkin_completed ? 'checkmark-circle' : 'time'}
-                size={40}
-                color={dashboard.today?.checkin_completed ? Colors.success : Colors.warning}
-              />
-              <View style={styles.checkinTextContainer}>
-                <Text style={styles.checkinTitle}>
-                  {dashboard.today?.checkin_completed ? 'Check-in Complete!' : 'Daily Check-in'}
-                </Text>
-                <Text style={styles.checkinSubtitle}>
-                  {dashboard.today?.checkin_completed
-                    ? 'Great job staying on track!'
-                    : "Don't forget to log your meals today"}
-                </Text>
-              </View>
+        {/* Workout Progress */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Workout Progress</Text>
+          <TouchableOpacity onPress={() => router.push('/workout-tracker')}>
+            <Text style={styles.seeAllText}>See all</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Card style={styles.workoutCard}>
+          <View style={styles.workoutContent}>
+            <View style={styles.workoutInfo}>
+              <Text style={styles.workoutTitle}>
+                {dashboard?.today?.workout_done ? 'Workout Complete!' : 'No workout today'}
+              </Text>
+              <Text style={styles.workoutSubtitle}>
+                {dashboard?.progress?.weekly_workouts || 0} workouts this week
+              </Text>
             </View>
-            {!dashboard.today?.checkin_completed && (
-              <GradientButton
-                title="Check In"
-                onPress={() => router.push('/check-in')}
-                style={styles.checkinButton}
+            <View
+              style={[
+                styles.workoutStatus,
+                dashboard?.today?.workout_done && styles.workoutStatusDone,
+              ]}
+            >
+              <Ionicons
+                name={dashboard?.today?.workout_done ? 'checkmark' : 'barbell'}
+                size={24}
+                color={dashboard?.today?.workout_done ? 'white' : Colors.textLight}
               />
-            )}
+            </View>
           </View>
+          {!dashboard?.today?.workout_done && (
+            <TouchableOpacity
+              style={styles.startWorkoutButton}
+              onPress={() => router.push('/workout-tracker')}
+            >
+              <LinearGradient colors={Gradients.secondary} style={styles.startWorkoutGradient}>
+                <Ionicons name="play" size={16} color="white" />
+                <Text style={styles.startWorkoutText}>Start Workout</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
         </Card>
 
-        {/* Diet Plan Preview */}
-        {dashboard.diet_plan && (
-          <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Your Diet Plan</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/diet-plan')}>
-                <Text style={styles.seeAllText}>See all</Text>
-              </TouchableOpacity>
-            </View>
-            <Card style={styles.dietCard} variant="elevated">
-              <View style={styles.dietContent}>
-                <Ionicons name="nutrition" size={32} color={Colors.primary} />
-                <View style={styles.dietInfo}>
-                  <Text style={styles.dietTitle}>{dashboard.diet_plan.name}</Text>
-                  <Text style={styles.dietSubtitle}>
-                    {dashboard.diet_plan.meals_count} meals{' '}
-                    {dashboard.diet_plan.daily_calories && `• ${dashboard.diet_plan.daily_calories} cal`}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={24} color={Colors.textLight} />
-              </View>
-            </Card>
-          </>
-        )}
+        {/* Quick Actions */}
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <View style={styles.quickActions}>
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/workout-tracker')}>
+            <LinearGradient colors={['#FF9B5A', '#FFCF87']} style={styles.quickActionGradient}>
+              <Ionicons name="barbell-outline" size={28} color="white" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Workout</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/sleep-tracker')}>
+            <LinearGradient colors={['#9B8AFB', '#C4B5FD']} style={styles.quickActionGradient}>
+              <Ionicons name="moon-outline" size={28} color="white" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Sleep</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/(tabs)/diet-plan')}>
+            <LinearGradient colors={Gradients.primary} style={styles.quickActionGradient}>
+              <Ionicons name="restaurant-outline" size={28} color="white" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Diet</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/(tabs)/progress')}>
+            <LinearGradient colors={['#42D742', '#98EE99']} style={styles.quickActionGradient}>
+              <Ionicons name="trending-up-outline" size={28} color="white" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Progress</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -323,51 +373,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...Shadow.light,
   },
-  notificationBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: Colors.error,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  notificationBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  progressCard: {
+  bmiCard: {
     borderRadius: BorderRadius.large,
     padding: Spacing.lg,
     marginBottom: Spacing.lg,
   },
-  progressCardContent: {
+  bmiContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  progressInfo: {
+  bmiInfo: {
     flex: 1,
   },
-  progressTitle: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginBottom: 4,
+  bmiLabel: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+    marginBottom: Spacing.sm,
   },
-  progressValue: {
-    fontSize: 24,
-    fontWeight: '700',
+  bmiBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    alignSelf: 'flex-start',
+  },
+  bmiBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
     color: 'white',
   },
-  progressGoal: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 4,
-  },
-  progressCircle: {
+  bmiCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
@@ -375,8 +410,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  progressPercent: {
-    fontSize: 20,
+  bmiValue: {
+    fontSize: 24,
     fontWeight: '700',
     color: 'white',
   },
@@ -403,6 +438,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: Colors.textDark,
+    marginBottom: Spacing.md,
   },
   checkButton: {
     borderRadius: BorderRadius.full,
@@ -421,104 +457,160 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textMedium,
   },
-  statusGrid: {
+  activityGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginBottom: Spacing.lg,
   },
-  statusCard: {
+  activityCard: {
     width: '48%',
     marginBottom: Spacing.md,
+    minHeight: 130,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  activityTitle: {
+    fontSize: 12,
+    color: Colors.textMedium,
+    marginLeft: Spacing.xs,
+  },
+  activityValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.textDark,
+  },
+  activityUnit: {
+    fontSize: 12,
+    color: Colors.textMedium,
+    fontWeight: '400',
+  },
+  waterProgress: {
+    flexDirection: 'row',
+    marginTop: Spacing.sm,
+  },
+  waterDot: {
+    width: 8,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: Colors.border,
+    marginRight: 4,
+  },
+  waterDotFilled: {
+    backgroundColor: '#5DCCFC',
+  },
+  addWaterButton: {
+    position: 'absolute',
+    top: Spacing.sm,
+    right: Spacing.sm,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.backgroundGray,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  statusIconContainer: {
+  logButton: {
+    marginTop: Spacing.sm,
+    backgroundColor: Colors.backgroundGray,
+    paddingVertical: 6,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.small,
+    alignSelf: 'flex-start',
+  },
+  logButtonText: {
+    fontSize: 10,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  calorieDetails: {
+    marginTop: Spacing.sm,
+  },
+  calorieText: {
+    fontSize: 10,
+    color: Colors.textMedium,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: Colors.border,
+    borderRadius: 3,
+    marginTop: Spacing.sm,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  workoutCard: {
+    marginBottom: Spacing.lg,
+  },
+  workoutContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  workoutInfo: {
+    flex: 1,
+  },
+  workoutTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textDark,
+  },
+  workoutSubtitle: {
+    fontSize: 12,
+    color: Colors.textMedium,
+    marginTop: 4,
+  },
+  workoutStatus: {
     width: 50,
     height: 50,
     borderRadius: 25,
     backgroundColor: Colors.backgroundGray,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: Spacing.sm,
   },
-  statusValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.textDark,
+  workoutStatusDone: {
+    backgroundColor: Colors.success,
   },
-  statusLabel: {
-    fontSize: 12,
-    color: Colors.textMedium,
-    marginTop: 4,
-    textAlign: 'center',
+  startWorkoutButton: {
+    marginTop: Spacing.md,
+    borderRadius: BorderRadius.full,
+    overflow: 'hidden',
   },
-  checkinCard: {
-    marginBottom: Spacing.lg,
-  },
-  checkinContent: {
-    alignItems: 'center',
-  },
-  checkinInfo: {
+  startWorkoutGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.md,
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
   },
-  checkinTextContainer: {
-    marginLeft: Spacing.md,
-    flex: 1,
-  },
-  checkinTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textDark,
-  },
-  checkinSubtitle: {
-    fontSize: 12,
-    color: Colors.textMedium,
-    marginTop: 2,
-  },
-  checkinButton: {
-    width: '100%',
-    height: 50,
-  },
-  dietCard: {
-    marginBottom: Spacing.lg,
-  },
-  dietContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dietInfo: {
-    flex: 1,
-    marginLeft: Spacing.md,
-  },
-  dietTitle: {
+  startWorkoutText: {
+    color: 'white',
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.textDark,
+    marginLeft: Spacing.xs,
   },
-  dietSubtitle: {
-    fontSize: 12,
-    color: Colors.textMedium,
-    marginTop: 2,
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.lg,
   },
-  noProfileContainer: {
-    flex: 1,
+  quickAction: {
+    alignItems: 'center',
+  },
+  quickActionGradient: {
+    width: 60,
+    height: 60,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.xs,
   },
-  noProfileTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.textDark,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.sm,
-  },
-  noProfileText: {
-    fontSize: 14,
+  quickActionText: {
+    fontSize: 12,
     color: Colors.textMedium,
-    textAlign: 'center',
-    lineHeight: 22,
   },
 });
