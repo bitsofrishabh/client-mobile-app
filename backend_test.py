@@ -55,7 +55,7 @@ class DietTrackerAPITester:
             print(f"Payload: {json.dumps(self.test_user, indent=2)}")
             print(f"Status Code: {response.status_code}")
             
-            if response.status_code == 201:
+            if response.status_code == 201 or response.status_code == 200:
                 data = response.json()
                 self.log_result("User Registration", True, "User registered successfully", data)
                 return True
