@@ -6,42 +6,49 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { clientAPI } from '../../src/services/api';
+import { dietPlanAPI, mealsAPI } from '../../src/services/api';
 import { Card } from '../../src/components/Card';
 import { Colors, Gradients, Spacing, BorderRadius } from '../../src/constants/theme';
 
-interface Meal {
-  time: string;
-  name: string;
-  items: Array<{
-    name: string;
-    quantity: string;
-    calories: number;
-  }>;
-}
-
 interface DietPlan {
-  id: string;
-  name: string;
-  description: string | null;
-  daily_calories: number | null;
-  meals: Meal[];
-  instructions: string | null;
+  plan_type: string;
+  daily_calories: number;
+  meals: Array<{
+    type: string;
+    time: string;
+    target_calories: number;
+    suggestions: Array<{
+      name: string;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
+  }>;
+  tips: string[];
 }
 
 export default function DietPlanScreen() {
+  const router = useRouter();
   const [dietPlan, setDietPlan] = useState<DietPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [todayMeals, setTodayMeals] = useState<any>(null);
 
-  const fetchDietPlan = async () => {
+  const fetchData = async () => {
     try {
-      const data = await clientAPI.getDietPlan();
-      setDietPlan(data.diet_plan);
+      const [planData, mealsData] = await Promise.all([
+        dietPlanAPI.getSample(),
+        mealsAPI.getToday(),
+      ]);
+      setDietPlan(planData);
+      setTodayMeals(mealsData);
     } catch (error) {
       console.error('Error fetching diet plan:', error);
     } finally {
@@ -51,33 +58,52 @@ export default function DietPlanScreen() {
   };
 
   useEffect(() => {
-    fetchDietPlan();
+    fetchData();
   }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchDietPlan();
+    fetchData();
   };
 
-  const getMealIcon = (mealName: string) => {
-    const name = mealName.toLowerCase();
-    if (name.includes('breakfast')) return 'sunny';
-    if (name.includes('lunch')) return 'restaurant';
-    if (name.includes('dinner')) return 'moon';
-    if (name.includes('snack')) return 'nutrition';
-    return 'fast-food';
+  const getMealIcon = (mealType: string) => {
+    switch (mealType.toLowerCase()) {
+      case 'breakfast':
+        return 'sunny';
+      case 'lunch':
+        return 'restaurant';
+      case 'dinner':
+        return 'moon';
+      case 'snack':
+        return 'nutrition';
+      default:
+        return 'fast-food';
+    }
   };
 
-  const formatTime = (time: string) => {
-    if (!time) return '';
-    try {
-      const [hours, minutes] = time.split(':');
-      const hour = parseInt(hours);
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const formattedHour = hour % 12 || 12;
-      return `${formattedHour}:${minutes} ${ampm}`;
-    } catch {
-      return time;
+  const getMealColor = (mealType: string) => {
+    switch (mealType.toLowerCase()) {
+      case 'breakfast':
+        return '#FFB347';
+      case 'lunch':
+        return '#5DCCFC';
+      case 'dinner':
+        return '#9B8AFB';
+      case 'snack':
+        return '#42D742';
+      default:
+        return Colors.primary;
+    }
+  };
+
+  const getPlanTypeLabel = (type: string) => {
+    switch (type) {
+      case 'weight_loss':
+        return 'Weight Loss Plan';
+      case 'weight_gain':
+        return 'Weight Gain Plan';
+      default:
+        return 'Maintenance Plan';
     }
   };
 
@@ -91,22 +117,9 @@ export default function DietPlanScreen() {
     );
   }
 
-  if (!dietPlan) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Diet Plan</Text>
-        </View>
-        <View style={styles.emptyContainer}>
-          <Ionicons name="document-text-outline" size={80} color={Colors.textLight} />
-          <Text style={styles.emptyTitle}>No Diet Plan Yet</Text>
-          <Text style={styles.emptyText}>
-            Your coach hasn't assigned a diet plan yet. Please contact them for your personalized meal plan.
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const caloriesConsumed = todayMeals?.total_calories || 0;
+  const calorieGoal = dietPlan?.daily_calories || 2000;
+  const caloriesRemaining = Math.max(0, calorieGoal - caloriesConsumed);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -118,14 +131,10 @@ export default function DietPlanScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Colors.primary}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
-        {/* Plan Overview */}
+        {/* Calorie Overview */}
         <LinearGradient
           colors={Gradients.secondary}
           start={{ x: 0, y: 0 }}
@@ -133,68 +142,96 @@ export default function DietPlanScreen() {
           style={styles.overviewCard}
         >
           <View style={styles.overviewContent}>
-            <Text style={styles.overviewTitle}>{dietPlan.name}</Text>
-            {dietPlan.description && (
-              <Text style={styles.overviewDescription}>{dietPlan.description}</Text>
-            )}
-            <View style={styles.overviewStats}>
-              <View style={styles.overviewStat}>
-                <Text style={styles.overviewStatValue}>{dietPlan.meals.length}</Text>
-                <Text style={styles.overviewStatLabel}>Meals</Text>
-              </View>
-              {dietPlan.daily_calories && (
-                <View style={styles.overviewStat}>
-                  <Text style={styles.overviewStatValue}>{dietPlan.daily_calories}</Text>
-                  <Text style={styles.overviewStatLabel}>Daily Cal</Text>
-                </View>
-              )}
+            <View>
+              <Text style={styles.overviewLabel}>{dietPlan ? getPlanTypeLabel(dietPlan.plan_type) : 'Your Plan'}</Text>
+              <Text style={styles.overviewCalories}>{calorieGoal} cal/day</Text>
+            </View>
+            <View style={styles.calorieCircle}>
+              <Text style={styles.calorieRemaining}>{caloriesRemaining}</Text>
+              <Text style={styles.calorieRemainingLabel}>left</Text>
             </View>
           </View>
+          <View style={styles.calorieBar}>
+            <View
+              style={[
+                styles.calorieBarFill,
+                { width: `${Math.min(100, (caloriesConsumed / calorieGoal) * 100)}%` },
+              ]}
+            />
+          </View>
+          <Text style={styles.consumedText}>{caloriesConsumed} cal consumed today</Text>
         </LinearGradient>
 
-        {/* Instructions */}
-        {dietPlan.instructions && (
-          <Card style={styles.instructionsCard}>
-            <View style={styles.instructionsHeader}>
-              <Ionicons name="information-circle" size={24} color={Colors.primary} />
-              <Text style={styles.instructionsTitle}>Instructions</Text>
-            </View>
-            <Text style={styles.instructionsText}>{dietPlan.instructions}</Text>
-          </Card>
-        )}
-
-        {/* Meals */}
-        <Text style={styles.sectionTitle}>Daily Meals</Text>
-        {dietPlan.meals.map((meal, index) => (
+        {/* Meal Schedule */}
+        <Text style={styles.sectionTitle}>Today's Meals</Text>
+        {dietPlan?.meals.map((meal, index) => (
           <Card key={index} style={styles.mealCard}>
             <View style={styles.mealHeader}>
-              <View style={styles.mealIconContainer}>
-                <Ionicons name={getMealIcon(meal.name) as any} size={24} color={Colors.primary} />
+              <View style={[styles.mealIconContainer, { backgroundColor: getMealColor(meal.type) + '20' }]}>
+                <Ionicons name={getMealIcon(meal.type) as any} size={24} color={getMealColor(meal.type)} />
               </View>
               <View style={styles.mealInfo}>
-                <Text style={styles.mealName}>{meal.name}</Text>
-                {meal.time && <Text style={styles.mealTime}>{formatTime(meal.time)}</Text>}
+                <Text style={styles.mealType}>{meal.type}</Text>
+                <Text style={styles.mealTime}>{meal.time} • {meal.target_calories} cal target</Text>
               </View>
+              <TouchableOpacity style={styles.addMealButton}>
+                <Ionicons name="add-circle" size={28} color={Colors.primary} />
+              </TouchableOpacity>
             </View>
-            {meal.items && meal.items.length > 0 ? (
-              <View style={styles.mealItems}>
-                {meal.items.map((item, itemIndex) => (
-                  <View key={itemIndex} style={styles.mealItem}>
-                    <View style={styles.mealItemDot} />
-                    <View style={styles.mealItemContent}>
-                      <Text style={styles.mealItemName}>{item.name}</Text>
-                      <Text style={styles.mealItemDetails}>
-                        {item.quantity}{item.calories ? ` • ${item.calories} cal` : ''}
-                      </Text>
-                    </View>
+
+            <Text style={styles.suggestionsTitle}>Suggestions</Text>
+            {meal.suggestions.map((suggestion, sIndex) => (
+              <TouchableOpacity key={sIndex} style={styles.suggestionItem}>
+                <View style={styles.suggestionDot} />
+                <View style={styles.suggestionContent}>
+                  <Text style={styles.suggestionName}>{suggestion.name}</Text>
+                  <View style={styles.nutritionRow}>
+                    <Text style={styles.nutritionItem}>{suggestion.calories} cal</Text>
+                    <Text style={styles.nutritionItem}>P: {suggestion.protein}g</Text>
+                    <Text style={styles.nutritionItem}>C: {suggestion.carbs}g</Text>
+                    <Text style={styles.nutritionItem}>F: {suggestion.fat}g</Text>
                   </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.noItems}>No items specified</Text>
-            )}
+                </View>
+              </TouchableOpacity>
+            ))}
           </Card>
         ))}
+
+        {/* Tips Section */}
+        {dietPlan?.tips && dietPlan.tips.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Nutrition Tips</Text>
+            <Card style={styles.tipsCard}>
+              {dietPlan.tips.map((tip, index) => (
+                <View key={index} style={styles.tipItem}>
+                  <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
+                  <Text style={styles.tipText}>{tip}</Text>
+                </View>
+              ))}
+            </Card>
+          </>
+        )}
+
+        {/* Categories */}
+        <Text style={styles.sectionTitle}>Browse by Category</Text>
+        <View style={styles.categoriesGrid}>
+          {[
+            { name: 'Salad', icon: 'leaf', color: '#42D742' },
+            { name: 'Protein', icon: 'fish', color: '#FF9B5A' },
+            { name: 'Smoothie', icon: 'wine', color: '#9B8AFB' },
+            { name: 'Snacks', icon: 'pizza', color: '#5DCCFC' },
+          ].map((category, index) => (
+            <TouchableOpacity key={index} style={styles.categoryItem}>
+              <LinearGradient
+                colors={[category.color, category.color + '80']}
+                style={styles.categoryIcon}
+              >
+                <Ionicons name={category.icon as any} size={28} color="white" />
+              </LinearGradient>
+              <Text style={styles.categoryName}>{category.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -230,53 +267,54 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     marginBottom: Spacing.lg,
   },
-  overviewContent: {},
-  overviewTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: 'white',
-    marginBottom: Spacing.xs,
-  },
-  overviewDescription: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    lineHeight: 20,
-    marginBottom: Spacing.md,
-  },
-  overviewStats: {
+  overviewContent: {
     flexDirection: 'row',
-    marginTop: Spacing.md,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  overviewStat: {
-    marginRight: Spacing.xl,
-  },
-  overviewStatValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: 'white',
-  },
-  overviewStatLabel: {
+  overviewLabel: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.8)',
   },
-  instructionsCard: {
-    marginBottom: Spacing.lg,
+  overviewCalories: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: 'white',
+    marginTop: 4,
   },
-  instructionsHeader: {
-    flexDirection: 'row',
+  calorieCircle: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: Spacing.sm,
   },
-  instructionsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textDark,
-    marginLeft: Spacing.sm,
+  calorieRemaining: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: 'white',
   },
-  instructionsText: {
-    fontSize: 14,
-    color: Colors.textMedium,
-    lineHeight: 22,
+  calorieRemainingLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  calorieBar: {
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 4,
+    marginTop: Spacing.md,
+    overflow: 'hidden',
+  },
+  calorieBarFill: {
+    height: '100%',
+    backgroundColor: 'white',
+    borderRadius: 4,
+  },
+  consumedText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: Spacing.sm,
   },
   sectionTitle: {
     fontSize: 16,
@@ -295,16 +333,15 @@ const styles = StyleSheet.create({
   mealIconContainer: {
     width: 50,
     height: 50,
-    borderRadius: 25,
-    backgroundColor: Colors.backgroundGray,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   mealInfo: {
-    marginLeft: Spacing.md,
     flex: 1,
+    marginLeft: Spacing.md,
   },
-  mealName: {
+  mealType: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.textDark,
@@ -315,15 +352,23 @@ const styles = StyleSheet.create({
     color: Colors.textMedium,
     marginTop: 2,
   },
-  mealItems: {
-    marginTop: Spacing.sm,
+  addMealButton: {
+    padding: Spacing.xs,
   },
-  mealItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  suggestionsTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textMedium,
     marginBottom: Spacing.sm,
   },
-  mealItemDot: {
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  suggestionDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
@@ -331,40 +376,56 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginRight: Spacing.sm,
   },
-  mealItemContent: {
+  suggestionContent: {
     flex: 1,
   },
-  mealItemName: {
+  suggestionName: {
     fontSize: 14,
+    fontWeight: '500',
     color: Colors.textDark,
   },
-  mealItemDetails: {
-    fontSize: 12,
+  nutritionRow: {
+    flexDirection: 'row',
+    marginTop: 4,
+  },
+  nutritionItem: {
+    fontSize: 10,
     color: Colors.textMedium,
-    marginTop: 2,
+    marginRight: Spacing.sm,
   },
-  noItems: {
+  tipsCard: {
+    marginBottom: Spacing.lg,
+  },
+  tipItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+  },
+  tipText: {
     fontSize: 14,
-    color: Colors.textLight,
-    fontStyle: 'italic',
-  },
-  emptyContainer: {
+    color: Colors.textDark,
+    marginLeft: Spacing.sm,
     flex: 1,
+  },
+  categoriesGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.lg,
+  },
+  categoryItem: {
+    alignItems: 'center',
+    width: '22%',
+  },
+  categoryIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.xs,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.textDark,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.sm,
-  },
-  emptyText: {
-    fontSize: 14,
+  categoryName: {
+    fontSize: 12,
     color: Colors.textMedium,
-    textAlign: 'center',
-    lineHeight: 22,
   },
 });
