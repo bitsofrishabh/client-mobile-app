@@ -8,15 +8,19 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../src/context/AuthContext';
+import { coachAPI } from '../../src/services/api';
+import { Input } from '../../src/components/Input';
+import { GradientButton } from '../../src/components/GradientButton';
 import { Colors, Gradients, Spacing, BorderRadius, Shadow } from '../../src/constants/theme';
 import { format } from 'date-fns';
 
-// Mock messages since API doesn't have chat endpoint
 interface Message {
   id: string;
   content: string;
@@ -25,23 +29,78 @@ interface Message {
 }
 
 export default function ChatScreen() {
-  const { user } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      content: "Hi! Welcome to DietTracker Pro. I'm your coach and I'll be helping you achieve your health goals. Feel free to message me anytime!",
-      sender: 'coach',
-      timestamp: new Date(Date.now() - 86400000),
-    },
-    {
-      id: '2',
-      content: "I've reviewed your profile and created a personalized diet plan for you. Make sure to check it in the Diet Plan tab!",
-      sender: 'coach',
-      timestamp: new Date(Date.now() - 3600000),
-    },
-  ]);
+  const { user, refreshUser } = useAuth();
+  const [showConnectModal, setShowConnectModal] = useState(false);
+  const [coachCode, setCoachCode] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const flatListRef = useRef<FlatList>(null);
+
+  const hasCoach = !!user?.coach_code;
+
+  useEffect(() => {
+    if (hasCoach) {
+      // Load demo messages when connected to coach
+      setMessages([
+        {
+          id: '1',
+          content: `Welcome! I'm your assigned coach. I've reviewed your profile and I'm here to help you reach your fitness goals. Feel free to ask me anything!`,
+          sender: 'coach',
+          timestamp: new Date(Date.now() - 86400000),
+        },
+        {
+          id: '2',
+          content: `I've created a personalized diet plan based on your BMI and goals. Check it out in the Diet Plan tab!`,
+          sender: 'coach',
+          timestamp: new Date(Date.now() - 3600000),
+        },
+      ]);
+    }
+  }, [hasCoach]);
+
+  const handleConnectCoach = async () => {
+    if (!coachCode.trim()) {
+      Alert.alert('Error', 'Please enter a coach code.');
+      return;
+    }
+
+    setConnecting(true);
+    try {
+      await coachAPI.connect(coachCode.trim());
+      await refreshUser();
+      setShowConnectModal(false);
+      setCoachCode('');
+      Alert.alert('Success', 'Connected to coach successfully!');
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to connect. Please check the code.');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = () => {
+    Alert.alert(
+      'Disconnect Coach',
+      'Are you sure you want to disconnect from your coach?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await coachAPI.disconnect();
+              await refreshUser();
+              setMessages([]);
+            } catch (error) {
+              console.error('Error disconnecting:', error);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const sendMessage = () => {
     if (!newMessage.trim()) return;
@@ -60,7 +119,7 @@ export default function ChatScreen() {
     setTimeout(() => {
       const reply: Message = {
         id: (Date.now() + 1).toString(),
-        content: "Thanks for your message! I'll get back to you soon. In the meantime, don't forget to complete your daily check-in!",
+        content: "Thanks for your message! I'll review it and get back to you soon. Keep up the great work with your fitness journey!",
         sender: 'coach',
         timestamp: new Date(),
       };
@@ -86,10 +145,7 @@ export default function ChatScreen() {
           ]}
         >
           {isUser ? (
-            <LinearGradient
-              colors={Gradients.primary}
-              style={styles.userBubbleGradient}
-            >
+            <LinearGradient colors={Gradients.primary} style={styles.userBubbleGradient}>
               <Text style={styles.messageTextUser}>{item.content}</Text>
             </LinearGradient>
           ) : (
@@ -103,6 +159,84 @@ export default function ChatScreen() {
     );
   };
 
+  // Not connected to coach - show connect screen
+  if (!hasCoach) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Chat with Coach</Text>
+        </View>
+
+        <View style={styles.connectContainer}>
+          <LinearGradient colors={Gradients.secondary} style={styles.connectIcon}>
+            <Ionicons name="chatbubbles" size={60} color="white" />
+          </LinearGradient>
+          <Text style={styles.connectTitle}>Connect with a Coach</Text>
+          <Text style={styles.connectDescription}>
+            Get personalized guidance from a professional fitness coach. Enter your coach's code to connect.
+          </Text>
+          <GradientButton
+            title="Connect with Coach"
+            onPress={() => setShowConnectModal(true)}
+            variant="secondary"
+            style={styles.connectButton}
+          />
+
+          <View style={styles.benefitsList}>
+            <View style={styles.benefitItem}>
+              <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
+              <Text style={styles.benefitText}>Personalized diet plans</Text>
+            </View>
+            <View style={styles.benefitItem}>
+              <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
+              <Text style={styles.benefitText}>Custom workout routines</Text>
+            </View>
+            <View style={styles.benefitItem}>
+              <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
+              <Text style={styles.benefitText}>Direct messaging support</Text>
+            </View>
+            <View style={styles.benefitItem}>
+              <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
+              <Text style={styles.benefitText}>Progress tracking & feedback</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Connect Modal */}
+        <Modal visible={showConnectModal} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <TouchableOpacity
+                style={styles.modalClose}
+                onPress={() => setShowConnectModal(false)}
+              >
+                <Ionicons name="close" size={24} color={Colors.textDark} />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Enter Coach Code</Text>
+              <Text style={styles.modalDescription}>
+                Ask your coach for their unique code to connect
+              </Text>
+              <Input
+                placeholder="Coach Code (e.g., ABC123)"
+                value={coachCode}
+                onChangeText={(text) => setCoachCode(text.toUpperCase())}
+                autoCapitalize="characters"
+                icon="ticket-outline"
+              />
+              <GradientButton
+                title="Connect"
+                onPress={handleConnectCoach}
+                loading={connecting}
+                variant="secondary"
+              />
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    );
+  }
+
+  // Connected to coach - show chat
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -112,17 +246,18 @@ export default function ChatScreen() {
           </LinearGradient>
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle}>Your Coach</Text>
-            <Text style={styles.headerSubtitle}>Usually responds within an hour</Text>
+            <Text style={styles.headerSubtitle}>Code: {user?.coach_code}</Text>
           </View>
+          <TouchableOpacity onPress={handleDisconnect}>
+            <Ionicons name="ellipsis-vertical" size={24} color={Colors.textDark} />
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* Mock Banner */}
       <View style={styles.mockBanner}>
         <Ionicons name="information-circle" size={16} color={Colors.warning} />
-        <Text style={styles.mockBannerText}>
-          Chat feature is currently in demo mode (MOCKED)
-        </Text>
+        <Text style={styles.mockBannerText}>Chat feature is in demo mode (MOCKED)</Text>
       </View>
 
       <FlatList
@@ -190,10 +325,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerInfo: {
+    flex: 1,
     marginLeft: Spacing.md,
   },
   headerTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: Colors.textDark,
   },
@@ -201,6 +337,79 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textMedium,
     marginTop: 2,
+  },
+  connectContainer: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.xxl,
+  },
+  connectIcon: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  connectTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: Colors.textDark,
+    marginBottom: Spacing.sm,
+  },
+  connectDescription: {
+    fontSize: 14,
+    color: Colors.textMedium,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: Spacing.lg,
+  },
+  connectButton: {
+    width: '100%',
+    marginBottom: Spacing.xl,
+  },
+  benefitsList: {
+    width: '100%',
+  },
+  benefitItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  benefitText: {
+    fontSize: 14,
+    color: Colors.textDark,
+    marginLeft: Spacing.md,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: BorderRadius.large,
+    borderTopRightRadius: BorderRadius.large,
+    padding: Spacing.xl,
+    paddingTop: Spacing.xxl,
+  },
+  modalClose: {
+    position: 'absolute',
+    top: Spacing.md,
+    right: Spacing.md,
+    padding: Spacing.sm,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.textDark,
+    marginBottom: Spacing.sm,
+  },
+  modalDescription: {
+    fontSize: 14,
+    color: Colors.textMedium,
+    marginBottom: Spacing.lg,
   },
   mockBanner: {
     flexDirection: 'row',

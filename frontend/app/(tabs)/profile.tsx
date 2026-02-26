@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,36 +6,76 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../src/context/AuthContext';
+import { packagesAPI } from '../../src/services/api';
 import { Card } from '../../src/components/Card';
+import { GradientButton } from '../../src/components/GradientButton';
 import { Colors, Gradients, Spacing, BorderRadius, Shadow } from '../../src/constants/theme';
+
+interface Package {
+  id: string;
+  name: string;
+  duration_months: number;
+  price: number;
+  features: string[];
+  popular: boolean;
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
+  const [showPackagesModal, setShowPackagesModal] = useState(false);
+  const [packages, setPackages] = useState<Package[]>([]);
+  const [subscribing, setSubscribing] = useState(false);
+
+  useEffect(() => {
+    fetchPackages();
+  }, []);
+
+  const fetchPackages = async () => {
+    try {
+      const data = await packagesAPI.getAll();
+      setPackages(data.packages || []);
+    } catch (error) {
+      console.error('Error fetching packages:', error);
+    }
+  };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/(auth)/login');
-          },
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          router.replace('/(auth)/login');
         },
-      ]
-    );
+      },
+    ]);
   };
+
+  const handleSubscribe = async (packageId: string) => {
+    setSubscribing(true);
+    try {
+      await packagesAPI.subscribe(packageId);
+      await refreshUser();
+      setShowPackagesModal(false);
+      Alert.alert('Success', 'Subscribed successfully! (Demo)');
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to subscribe.');
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const currentPackage = packages.find((p) => p.id === user?.package_id);
 
   const menuItems = [
     {
@@ -44,15 +84,27 @@ export default function ProfileScreen() {
         { icon: 'person-outline', label: 'Personal Data', onPress: () => {} },
         { icon: 'trophy-outline', label: 'Achievement', onPress: () => {} },
         { icon: 'time-outline', label: 'Activity History', onPress: () => {} },
-        { icon: 'bar-chart-outline', label: 'Workout Progress', onPress: () => router.push('/(tabs)/progress') },
+        { icon: 'bar-chart-outline', label: 'Progress', onPress: () => router.push('/(tabs)/progress') },
+      ],
+    },
+    {
+      title: 'Subscription',
+      items: [
+        {
+          icon: 'card-outline',
+          label: currentPackage ? currentPackage.name : 'No Active Package',
+          sublabel: currentPackage ? `${currentPackage.duration_months} month(s)` : 'Tap to view packages',
+          onPress: () => setShowPackagesModal(true),
+        },
       ],
     },
     {
       title: 'Other',
       items: [
-        { icon: 'mail-outline', label: 'Contact Us', onPress: () => {} },
+        { icon: 'notifications-outline', label: 'Notifications', onPress: () => {} },
         { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => {} },
         { icon: 'settings-outline', label: 'Settings', onPress: () => {} },
+        { icon: 'help-circle-outline', label: 'Help & Support', onPress: () => {} },
       ],
     },
   ];
@@ -63,39 +115,65 @@ export default function ProfileScreen() {
         <Text style={styles.headerTitle}>Profile</Text>
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Profile Card */}
         <Card style={styles.profileCard} variant="elevated">
           <View style={styles.profileContent}>
             <LinearGradient colors={Gradients.primary} style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {user?.name?.charAt(0).toUpperCase() || 'U'}
-              </Text>
+              <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'U'}</Text>
             </LinearGradient>
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>{user?.name}</Text>
               <Text style={styles.profileEmail}>{user?.email}</Text>
             </View>
             <TouchableOpacity style={styles.editButton}>
-              <LinearGradient
-                colors={Gradients.primary}
-                style={styles.editButtonGradient}
-              >
+              <LinearGradient colors={Gradients.primary} style={styles.editButtonGradient}>
                 <Text style={styles.editButtonText}>Edit</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
+
+          {/* Stats Row */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{user?.height_cm || '--'}</Text>
+              <Text style={styles.statLabel}>Height (cm)</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{user?.weight_kg || '--'}</Text>
+              <Text style={styles.statLabel}>Weight (kg)</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{user?.age || '--'}</Text>
+              <Text style={styles.statLabel}>Age</Text>
+            </View>
+          </View>
         </Card>
+
+        {/* BMI Card */}
+        {user?.bmi && (
+          <Card style={styles.bmiCard}>
+            <View style={styles.bmiContent}>
+              <View>
+                <Text style={styles.bmiLabel}>Your BMI</Text>
+                <Text style={styles.bmiValue}>{user.bmi.toFixed(1)}</Text>
+              </View>
+              <View style={styles.bmiCalories}>
+                <Text style={styles.caloriesLabel}>Daily Calories</Text>
+                <Text style={styles.caloriesValue}>{user.daily_calorie_goal || '--'} cal</Text>
+              </View>
+            </View>
+          </Card>
+        )}
 
         {/* Menu Sections */}
         {menuItems.map((section, sectionIndex) => (
           <View key={sectionIndex} style={styles.menuSection}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
             <Card style={styles.menuCard}>
-              {section.items.map((item, itemIndex) => (
+              {section.items.map((item: any, itemIndex) => (
                 <TouchableOpacity
                   key={itemIndex}
                   style={[
@@ -105,18 +183,13 @@ export default function ProfileScreen() {
                   onPress={item.onPress}
                 >
                   <View style={styles.menuItemLeft}>
-                    <Ionicons
-                      name={item.icon as any}
-                      size={20}
-                      color={Colors.primary}
-                    />
-                    <Text style={styles.menuItemLabel}>{item.label}</Text>
+                    <Ionicons name={item.icon as any} size={20} color={Colors.primary} />
+                    <View style={styles.menuItemTextContainer}>
+                      <Text style={styles.menuItemLabel}>{item.label}</Text>
+                      {item.sublabel && <Text style={styles.menuItemSublabel}>{item.sublabel}</Text>}
+                    </View>
                   </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={Colors.textLight}
-                  />
+                  <Ionicons name="chevron-forward" size={20} color={Colors.textLight} />
                 </TouchableOpacity>
               ))}
             </Card>
@@ -131,9 +204,73 @@ export default function ProfileScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* App Version */}
-        <Text style={styles.versionText}>DietTracker Pro v1.0.0</Text>
+        <Text style={styles.versionText}>DietTracker Pro v2.0.0</Text>
       </ScrollView>
+
+      {/* Packages Modal */}
+      <Modal visible={showPackagesModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Choose a Package</Text>
+              <TouchableOpacity onPress={() => setShowPackagesModal(false)}>
+                <Ionicons name="close" size={24} color={Colors.textDark} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {packages.map((pkg) => (
+                <TouchableOpacity
+                  key={pkg.id}
+                  style={[
+                    styles.packageCard,
+                    pkg.popular && styles.packageCardPopular,
+                    user?.package_id === pkg.id && styles.packageCardActive,
+                  ]}
+                  onPress={() => handleSubscribe(pkg.id)}
+                  disabled={subscribing}
+                >
+                  {pkg.popular && (
+                    <View style={styles.popularBadge}>
+                      <Text style={styles.popularBadgeText}>POPULAR</Text>
+                    </View>
+                  )}
+                  <Text style={styles.packageName}>{pkg.name}</Text>
+                  <Text style={styles.packagePrice}>
+                    ${pkg.price}
+                    <Text style={styles.packageDuration}> / {pkg.duration_months} month(s)</Text>
+                  </Text>
+                  <View style={styles.packageFeatures}>
+                    {pkg.features.map((feature, index) => (
+                      <View key={index} style={styles.featureItem}>
+                        <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+                        <Text style={styles.featureText}>{feature}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  {user?.package_id === pkg.id ? (
+                    <View style={styles.currentPlanBadge}>
+                      <Text style={styles.currentPlanText}>Current Plan</Text>
+                    </View>
+                  ) : (
+                    <GradientButton
+                      title="Select Plan"
+                      onPress={() => handleSubscribe(pkg.id)}
+                      loading={subscribing}
+                      style={styles.selectButton}
+                      variant={pkg.popular ? 'secondary' : 'primary'}
+                    />
+                  )}
+                </TouchableOpacity>
+              ))}
+
+              <Text style={styles.demoNote}>
+                Note: This is a demo. No actual payment will be processed.
+              </Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -164,6 +301,7 @@ const styles = StyleSheet.create({
   profileContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: Spacing.md,
   },
   avatar: {
     width: 60,
@@ -204,6 +342,60 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'white',
   },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: Colors.textMedium,
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: Colors.border,
+  },
+  bmiCard: {
+    marginBottom: Spacing.lg,
+  },
+  bmiContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  bmiLabel: {
+    fontSize: 12,
+    color: Colors.textMedium,
+  },
+  bmiValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  bmiCalories: {
+    alignItems: 'flex-end',
+  },
+  caloriesLabel: {
+    fontSize: 12,
+    color: Colors.textMedium,
+  },
+  caloriesValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.secondary,
+  },
   menuSection: {
     marginBottom: Spacing.lg,
   },
@@ -231,11 +423,20 @@ const styles = StyleSheet.create({
   menuItemLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+  },
+  menuItemTextContainer: {
+    marginLeft: Spacing.md,
+    flex: 1,
   },
   menuItemLabel: {
     fontSize: 14,
     color: Colors.textDark,
-    marginLeft: Spacing.md,
+  },
+  menuItemSublabel: {
+    fontSize: 11,
+    color: Colors.textMedium,
+    marginTop: 2,
   },
   logoutButton: {
     backgroundColor: Colors.background,
@@ -259,5 +460,108 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textLight,
     textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: BorderRadius.large,
+    borderTopRightRadius: BorderRadius.large,
+    padding: Spacing.lg,
+    maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.textDark,
+  },
+  packageCard: {
+    backgroundColor: Colors.backgroundGray,
+    borderRadius: BorderRadius.large,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  packageCardPopular: {
+    borderColor: Colors.secondary,
+  },
+  packageCardActive: {
+    borderColor: Colors.success,
+    backgroundColor: Colors.success + '10',
+  },
+  popularBadge: {
+    position: 'absolute',
+    top: -10,
+    right: Spacing.md,
+    backgroundColor: Colors.secondary,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.small,
+  },
+  popularBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'white',
+  },
+  packageName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.textDark,
+    marginBottom: Spacing.xs,
+  },
+  packagePrice: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  packageDuration: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: Colors.textMedium,
+  },
+  packageFeatures: {
+    marginTop: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  featureText: {
+    fontSize: 13,
+    color: Colors.textDark,
+    marginLeft: Spacing.sm,
+  },
+  currentPlanBadge: {
+    backgroundColor: Colors.success,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    alignItems: 'center',
+  },
+  currentPlanText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  selectButton: {
+    height: 48,
+  },
+  demoNote: {
+    fontSize: 12,
+    color: Colors.textMedium,
+    textAlign: 'center',
+    marginTop: Spacing.md,
+    marginBottom: Spacing.lg,
   },
 });
