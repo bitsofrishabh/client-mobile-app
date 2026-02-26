@@ -65,9 +65,13 @@ export default function Onboarding() {
     <View style={styles.slide}>
       <LinearGradient
         colors={Gradients.primary}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
         style={styles.iconContainer}
       >
-        <Ionicons name={item.icon as any} size={80} color="white" />
+        <View style={styles.iconInner}>
+          <Ionicons name={item.icon as any} size={80} color="white" />
+        </View>
       </LinearGradient>
       <Text style={styles.title}>{item.title}</Text>
       <Text style={styles.description}>{item.description}</Text>
