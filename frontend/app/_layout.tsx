@@ -12,6 +12,8 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="check-in" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="workout-tracker" options={{ presentation: 'card' }} />
+        <Stack.Screen name="sleep-tracker" options={{ presentation: 'card' }} />
       </Stack>
     </AuthProvider>
   );
