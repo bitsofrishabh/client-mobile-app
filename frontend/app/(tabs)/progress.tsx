@@ -16,17 +16,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LineChart } from 'react-native-gifted-charts';
-import { clientAPI } from '../../src/services/api';
+import { weightAPI } from '../../src/services/api';
+import { useAuth } from '../../src/context/AuthContext';
 import { Card } from '../../src/components/Card';
 import { GradientButton } from '../../src/components/GradientButton';
 import { Colors, Gradients, Spacing, BorderRadius } from '../../src/constants/theme';
 import { format } from 'date-fns';
 
 interface WeightEntry {
-  id: string;
+  date: string;
   weight_kg: number;
-  recorded_date: string;
-  notes: string | null;
+  notes?: string;
 }
 
 interface WeightsData {
@@ -37,6 +37,7 @@ interface WeightsData {
 }
 
 export default function ProgressScreen() {
+  const { user } = useAuth();
   const [data, setData] = useState<WeightsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -45,7 +46,7 @@ export default function ProgressScreen() {
 
   const fetchWeights = async () => {
     try {
-      const response = await clientAPI.getWeights();
+      const response = await weightAPI.getHistory();
       setData(response);
     } catch (error) {
       console.error('Error fetching weights:', error);
@@ -73,7 +74,7 @@ export default function ProgressScreen() {
 
     setSubmitting(true);
     try {
-      await clientAPI.logWeight(weight);
+      await weightAPI.log(weight);
       setNewWeight('');
       fetchWeights();
       Alert.alert('Success', 'Weight logged successfully!');
@@ -86,12 +87,13 @@ export default function ProgressScreen() {
 
   const getChartData = () => {
     if (!data?.weights || data.weights.length === 0) return [];
-    
+
     return data.weights
       .slice(-14) // Last 14 entries
+      .reverse()
       .map((entry) => ({
         value: entry.weight_kg,
-        label: format(new Date(entry.recorded_date), 'dd/MM'),
+        label: format(new Date(entry.date), 'dd/MM'),
         dataPointText: entry.weight_kg.toString(),
       }));
   };
@@ -107,10 +109,12 @@ export default function ProgressScreen() {
   }
 
   const chartData = getChartData();
-  const weightLost = data ? Math.abs(data.initial_weight - data.current_weight) : 0;
-  const progress = data
-    ? Math.min(100, Math.max(0, ((data.initial_weight - data.current_weight) / 
-        (data.initial_weight - data.goal_weight)) * 100))
+  const currentWeight = data?.current_weight || user?.weight_kg || 0;
+  const goalWeight = data?.goal_weight || user?.goal_weight_kg || currentWeight;
+  const initialWeight = data?.initial_weight || currentWeight;
+  const weightLost = Math.abs(initialWeight - currentWeight);
+  const progress = goalWeight !== initialWeight
+    ? Math.min(100, Math.max(0, ((initialWeight - currentWeight) / (initialWeight - goalWeight)) * 100))
     : 0;
 
   return (
@@ -127,32 +131,24 @@ export default function ProgressScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={Colors.primary}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
           }
         >
           {/* Stats Overview */}
           <View style={styles.statsRow}>
             <Card style={styles.statCard}>
               <Text style={styles.statLabel}>Current</Text>
-              <Text style={styles.statValue}>{data?.current_weight || '-'}</Text>
+              <Text style={styles.statValue}>{currentWeight.toFixed(1)}</Text>
               <Text style={styles.statUnit}>kg</Text>
             </Card>
             <Card style={styles.statCard}>
               <Text style={styles.statLabel}>Goal</Text>
-              <Text style={[styles.statValue, { color: Colors.primary }]}>
-                {data?.goal_weight || '-'}
-              </Text>
+              <Text style={[styles.statValue, { color: Colors.primary }]}>{goalWeight.toFixed(1)}</Text>
               <Text style={styles.statUnit}>kg</Text>
             </Card>
             <Card style={styles.statCard}>
               <Text style={styles.statLabel}>Lost</Text>
-              <Text style={[styles.statValue, { color: Colors.success }]}>
-                {weightLost.toFixed(1)}
-              </Text>
+              <Text style={[styles.statValue, { color: Colors.success }]}>{weightLost.toFixed(1)}</Text>
               <Text style={styles.statUnit}>kg</Text>
             </Card>
           </View>
@@ -235,8 +231,8 @@ export default function ProgressScreen() {
           {data?.weights && data.weights.length > 0 && (
             <>
               <Text style={styles.sectionTitle}>Recent Entries</Text>
-              {data.weights.slice(-5).reverse().map((entry) => (
-                <Card key={entry.id} style={styles.entryCard}>
+              {data.weights.slice(0, 5).map((entry, index) => (
+                <Card key={index} style={styles.entryCard}>
                   <View style={styles.entryContent}>
                     <View style={styles.entryIcon}>
                       <Ionicons name="scale-outline" size={24} color={Colors.primary} />
@@ -244,7 +240,7 @@ export default function ProgressScreen() {
                     <View style={styles.entryInfo}>
                       <Text style={styles.entryWeight}>{entry.weight_kg} kg</Text>
                       <Text style={styles.entryDate}>
-                        {format(new Date(entry.recorded_date), 'MMMM dd, yyyy')}
+                        {format(new Date(entry.date), 'MMMM dd, yyyy')}
                       </Text>
                     </View>
                   </View>
