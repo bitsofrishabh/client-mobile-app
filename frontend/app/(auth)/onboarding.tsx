@@ -177,6 +177,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.xxl,
   },
+  iconInner: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   title: {
     fontSize: 24,
     fontWeight: '700',
