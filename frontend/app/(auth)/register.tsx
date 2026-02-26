@@ -64,11 +64,21 @@ export default function Register() {
     
     setLoading(true);
     try {
+      console.log('Attempting registration with:', { name, email, inviteCode });
       await register(name, email, password, inviteCode);
+      console.log('Registration successful!');
       router.replace('/(tabs)');
     } catch (error: any) {
-      const message = error.response?.data?.detail || 'Registration failed. Please try again.';
-      Alert.alert('Error', typeof message === 'string' ? message : 'Registration failed');
+      console.error('Registration error:', error);
+      console.error('Error response:', error.response?.data);
+      const detail = error.response?.data?.detail;
+      let message = 'Registration failed. Please try again.';
+      if (typeof detail === 'string') {
+        message = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        message = detail[0]?.msg || detail[0]?.message || JSON.stringify(detail[0]);
+      }
+      Alert.alert('Registration Error', message);
     } finally {
       setLoading(false);
     }
