@@ -34,7 +34,7 @@ interface Package {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout, refreshUser } = useAuth();
+  const { user, logout, refreshUser, isCoachConnected } = useAuth();
   const [showPackagesModal, setShowPackagesModal] = useState(false);
   const [packages, setPackages] = useState<Package[]>([]);
   const [subscribing, setSubscribing] = useState(false);
@@ -114,6 +114,12 @@ export default function ProfileScreen() {
       title: 'Account',
       items: [
         { icon: 'person-outline', label: 'Personal Data', onPress: () => {} },
+        {
+          icon: 'people-outline',
+          label: isCoachConnected ? 'Coach Connection' : 'Connect with Coach',
+          sublabel: isCoachConnected ? 'Linked \u2014 tap to manage' : 'Get a personalized diet plan',
+          onPress: () => router.push('/coach-connect'),
+        },
         { icon: 'flag-outline', label: 'My Goals', onPress: () => router.push('/goal-selection') },
         { icon: 'camera-outline', label: 'Progress Photos', onPress: () => router.push('/progress-photos') },
         { icon: 'bar-chart-outline', label: 'Weekly Report', onPress: () => router.push('/weekly-report') },

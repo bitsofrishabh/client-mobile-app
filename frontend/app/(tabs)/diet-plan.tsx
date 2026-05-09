@@ -13,6 +13,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { dietPlanAPI, mealsAPI } from '../../src/services/api';
+import { portalDietPlanAPI } from '../../src/services/portalApi';
+import { useAuth } from '../../src/context/AuthContext';
 import { Card } from '../../src/components/Card';
 import { Colors, Gradients, Spacing, BorderRadius } from '../../src/constants/theme';
 
@@ -36,21 +38,76 @@ interface DietPlan {
 
 export default function DietPlanScreen() {
   const router = useRouter();
+  const { isCoachConnected } = useAuth();
   const [dietPlan, setDietPlan] = useState<DietPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [todayMeals, setTodayMeals] = useState<any>(null);
+  const [planSource, setPlanSource] = useState<'coach' | 'sample' | 'pending' | 'none'>('sample');
+
+  const normalizePortalPlan = (raw: any): DietPlan | null => {
+    if (!raw) return null;
+    // Portal returns { id, name, daily_calories, meals: [{ name, time, items: [...] }], ... }
+    const meals = Array.isArray(raw.meals) ? raw.meals : [];
+    return {
+      plan_type: raw.name || 'Personalized Plan',
+      daily_calories: raw.daily_calories || 0,
+      meals: meals.map((m: any) => ({
+        type: m.name || m.type || 'Meal',
+        time: m.time || '',
+        target_calories: m.target_calories || m.calories || 0,
+        suggestions: (m.items || m.suggestions || []).map((it: any) => ({
+          name: it.name || it.food || '',
+          calories: it.calories || 0,
+          protein: it.protein || 0,
+          carbs: it.carbs || 0,
+          fat: it.fat || 0,
+        })),
+      })),
+      tips: raw.instructions
+        ? (Array.isArray(raw.instructions) ? raw.instructions : [raw.instructions])
+        : raw.tips || [],
+    };
+  };
 
   const fetchData = async () => {
     try {
-      const [planData, mealsData] = await Promise.all([
-        dietPlanAPI.getSample(),
-        mealsAPI.getToday(),
-      ]);
-      setDietPlan(planData);
+      const tasks: Promise<any>[] = [mealsAPI.getToday()];
+
+      if (isCoachConnected) {
+        tasks.unshift(
+          portalDietPlanAPI
+            .getAssigned()
+            .then((d) => ({ source: 'coach', data: d }))
+            .catch((err) => {
+              const status = err?.response?.status;
+              if (status === 404) {
+                return { source: 'pending', data: null };
+              }
+              return dietPlanAPI
+                .getSample()
+                .then((d) => ({ source: 'sample', data: d }));
+            })
+        );
+      } else {
+        tasks.unshift(
+          dietPlanAPI.getSample().then((d) => ({ source: 'sample', data: d }))
+        );
+      }
+
+      const [planResult, mealsData] = await Promise.all(tasks);
+      let normalized: DietPlan | null = null;
+      if (planResult.source === 'coach') {
+        normalized = normalizePortalPlan(planResult.data);
+      } else if (planResult.source === 'sample') {
+        normalized = planResult.data;
+      }
+      setDietPlan(normalized);
+      setPlanSource(planResult.source as any);
       setTodayMeals(mealsData);
     } catch (error) {
       console.error('Error fetching diet plan:', error);
+      setPlanSource('none');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -59,7 +116,7 @@ export default function DietPlanScreen() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [isCoachConnected]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -134,6 +191,56 @@ export default function DietPlanScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
+        {/* Coach status banner */}
+        {planSource === 'coach' ? (
+          <Card style={styles.coachBanner}>
+            <View style={styles.coachBannerRow}>
+              <View style={styles.coachBadge}>
+                <Ionicons name="medal" size={18} color="#fff" />
+              </View>
+              <View style={{ flex: 1, marginLeft: Spacing.md }}>
+                <Text style={styles.coachBannerTitle}>Plan from your dietician</Text>
+                <Text style={styles.coachBannerSub}>Personalized for your goals</Text>
+              </View>
+            </View>
+          </Card>
+        ) : planSource === 'pending' ? (
+          <Card style={styles.pendingCard}>
+            <View style={styles.pendingIconWrap}>
+              <Ionicons name="hourglass-outline" size={36} color={Colors.primary} />
+            </View>
+            <Text style={styles.pendingTitle}>Waiting for your plan</Text>
+            <Text style={styles.pendingSub}>
+              You&apos;re connected with your dietician. They&apos;ll assign your personalized diet
+              plan soon. We&apos;ll notify you the moment it&apos;s ready.
+            </Text>
+            <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
+              <Ionicons name="refresh" size={16} color={Colors.primary} />
+              <Text style={styles.refreshText}>Check again</Text>
+            </TouchableOpacity>
+          </Card>
+        ) : (
+          <TouchableOpacity onPress={() => router.push('/coach-connect')} activeOpacity={0.85}>
+            <LinearGradient
+              colors={['#92A3FD', '#9DCEFF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.connectBanner}
+            >
+              <Ionicons name="people" size={22} color="#fff" />
+              <View style={{ flex: 1, marginLeft: Spacing.md }}>
+                <Text style={styles.connectBannerTitle}>Get a personalized plan</Text>
+                <Text style={styles.connectBannerSub}>
+                  Have an invite code? Connect with your dietician.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+        {planSource !== 'pending' && (
+        <>
         {/* Calorie Overview */}
         <LinearGradient
           colors={Gradients.secondary}
@@ -232,6 +339,8 @@ export default function DietPlanScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -427,5 +536,92 @@ const styles = StyleSheet.create({
   categoryName: {
     fontSize: 12,
     color: Colors.textMedium,
+  },
+  coachBanner: {
+    marginBottom: Spacing.md,
+    backgroundColor: 'rgba(146, 163, 253, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(146, 163, 253, 0.4)',
+  },
+  coachBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  coachBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  coachBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textDark,
+  },
+  coachBannerSub: {
+    fontSize: 12,
+    color: Colors.textMedium,
+    marginTop: 2,
+  },
+  connectBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.large,
+    marginBottom: Spacing.md,
+  },
+  connectBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  connectBannerSub: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 2,
+  },
+  pendingCard: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+    marginBottom: Spacing.md,
+  },
+  pendingIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    backgroundColor: 'rgba(146, 163, 253, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  pendingTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: Colors.textDark,
+    marginBottom: Spacing.xs,
+  },
+  pendingSub: {
+    fontSize: 13,
+    color: Colors.textMedium,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.md,
+    lineHeight: 18,
+  },
+  refreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.md,
+    backgroundColor: 'rgba(146, 163, 253, 0.12)',
+    borderRadius: BorderRadius.medium,
+  },
+  refreshText: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '600',
+    marginLeft: Spacing.xs,
   },
 });
