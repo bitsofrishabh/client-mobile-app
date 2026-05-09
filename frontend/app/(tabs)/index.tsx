@@ -14,9 +14,19 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../src/context/AuthContext';
-import { dashboardAPI, waterAPI } from '../../src/services/api';
+import { dashboardAPI, waterAPI, stepsAPI } from '../../src/services/api';
 import { Card } from '../../src/components/Card';
 import { Colors, Gradients, Spacing, BorderRadius, Shadow } from '../../src/constants/theme';
+import {
+  isPedometerAvailable,
+  requestPedometerPermissions,
+  getTodaySteps,
+  watchSteps,
+} from '../../src/services/pedometer';
+import {
+  scheduleMealReminders,
+  areMealRemindersScheduled,
+} from '../../src/services/notifications';
 
 const { width } = Dimensions.get('window');
 
@@ -52,6 +62,7 @@ export default function Home() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [liveSteps, setLiveSteps] = useState<number | null>(null);
 
   const fetchDashboard = async () => {
     try {
@@ -65,8 +76,69 @@ export default function Home() {
     }
   };
 
+  // Initialize pedometer + meal reminders + dashboard
   useEffect(() => {
     fetchDashboard();
+
+    // Schedule meal reminders once if not already scheduled
+    (async () => {
+      try {
+        const already = await areMealRemindersScheduled();
+        if (!already) {
+          await scheduleMealReminders();
+        }
+      } catch (e) {
+        console.warn('Failed to init meal reminders', e);
+      }
+    })();
+
+    // Initialize pedometer
+    let watcher: { remove: () => void } | null = null;
+    let syncInterval: any = null;
+
+    (async () => {
+      try {
+        const available = await isPedometerAvailable();
+        if (!available) return;
+        await requestPedometerPermissions();
+
+        const todaySteps = await getTodaySteps();
+        if (todaySteps > 0) {
+          setLiveSteps(todaySteps);
+          try {
+            await stepsAPI.log(todaySteps);
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        // Watch for live updates (from foreground)
+        watcher = watchSteps((steps) => {
+          // steps from watchStepCount is incremental since subscription
+          setLiveSteps((prev) => (prev || todaySteps) + steps);
+        });
+
+        // Sync to backend every 60s while app is open
+        syncInterval = setInterval(async () => {
+          try {
+            const s = await getTodaySteps();
+            if (s > 0) {
+              setLiveSteps(s);
+              await stepsAPI.log(s);
+            }
+          } catch (e) {
+            // ignore
+          }
+        }, 60000);
+      } catch (e) {
+        console.warn('Pedometer init error', e);
+      }
+    })();
+
+    return () => {
+      if (watcher) watcher.remove();
+      if (syncInterval) clearInterval(syncInterval);
+    };
   }, []);
 
   const onRefresh = useCallback(() => {
@@ -129,8 +201,8 @@ export default function Home() {
             <Text style={styles.greeting}>{getGreeting()},</Text>
             <Text style={styles.userName}>{dashboard?.user?.name || user?.name}</Text>
           </View>
-          <TouchableOpacity style={styles.notificationButton}>
-            <Ionicons name="notifications-outline" size={24} color={Colors.textDark} />
+          <TouchableOpacity style={styles.notificationButton} onPress={() => router.push('/weekly-report')}>
+            <Ionicons name="bar-chart-outline" size={24} color={Colors.textDark} />
           </TouchableOpacity>
         </View>
 
@@ -238,7 +310,9 @@ export default function Home() {
               <Text style={styles.activityTitle}>Steps</Text>
             </View>
             <Text style={styles.activityValue}>
-              <Text style={{ color: '#42D742' }}>{dashboard?.today?.steps || 0}</Text>
+              <Text style={{ color: '#42D742' }}>
+                {liveSteps !== null ? liveSteps : dashboard?.today?.steps || 0}
+              </Text>
               <Text style={styles.activityUnit}>/10k</Text>
             </Text>
             <View style={styles.progressBar}>
@@ -246,7 +320,10 @@ export default function Home() {
                 style={[
                   styles.progressFill,
                   {
-                    width: `${Math.min(100, ((dashboard?.today?.steps || 0) / 10000) * 100)}%`,
+                    width: `${Math.min(
+                      100,
+                      ((liveSteps !== null ? liveSteps : dashboard?.today?.steps || 0) / 10000) * 100
+                    )}%`,
                     backgroundColor: '#42D742',
                   },
                 ]}
@@ -301,7 +378,18 @@ export default function Home() {
 
         {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.quickActions}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quickActionsScroll}
+        >
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/meal-logger')}>
+            <LinearGradient colors={['#FF6B6B', '#FF9999']} style={styles.quickActionGradient}>
+              <Ionicons name="restaurant-outline" size={28} color="white" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Log Meal</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/workout-tracker')}>
             <LinearGradient colors={['#FF9B5A', '#FFCF87']} style={styles.quickActionGradient}>
               <Ionicons name="barbell-outline" size={28} color="white" />
@@ -318,9 +406,16 @@ export default function Home() {
 
           <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/(tabs)/diet-plan')}>
             <LinearGradient colors={Gradients.primary} style={styles.quickActionGradient}>
-              <Ionicons name="restaurant-outline" size={28} color="white" />
+              <Ionicons name="nutrition-outline" size={28} color="white" />
             </LinearGradient>
-            <Text style={styles.quickActionText}>Diet</Text>
+            <Text style={styles.quickActionText}>Diet Plan</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/progress-photos')}>
+            <LinearGradient colors={['#5DCCFC', '#9DCEFF']} style={styles.quickActionGradient}>
+              <Ionicons name="camera-outline" size={28} color="white" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Photos</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/(tabs)/progress')}>
@@ -329,7 +424,14 @@ export default function Home() {
             </LinearGradient>
             <Text style={styles.quickActionText}>Progress</Text>
           </TouchableOpacity>
-        </View>
+
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/weekly-report')}>
+            <LinearGradient colors={['#C58BF2', '#EEA4CE']} style={styles.quickActionGradient}>
+              <Ionicons name="bar-chart-outline" size={28} color="white" />
+            </LinearGradient>
+            <Text style={styles.quickActionText}>Report</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </ScrollView>
     </SafeAreaView>
   );
@@ -598,8 +700,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: Spacing.lg,
   },
+  quickActionsScroll: {
+    paddingBottom: Spacing.lg,
+    paddingRight: Spacing.lg,
+  },
   quickAction: {
     alignItems: 'center',
+    marginRight: Spacing.md,
+    width: 72,
   },
   quickActionGradient: {
     width: 60,

@@ -102,7 +102,139 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Build a React Native/Expo mobile app for DietTracker Pro - Client App with onboarding, auth, dashboard, diet plan view, daily check-in, weight logging, chat with coach, and profile features. Backend API is at https://pdf-platform-1.preview.emergentagent.com/api"
+user_problem_statement: "Standalone fitness app (Diet Tracker Pro) — local FastAPI + MongoDB backend. New MVP features added: Goal Selection Onboarding, Steps via expo-sensors, Meal Reminders via expo-notifications (10AM/2PM/9PM), Weekly Reports UI, wired meal-logger and progress-photos screens."
+
+backend:
+  - task: "Local Backend - Goals Endpoints (GET/POST /api/goals)"
+    implemented: true
+    working: false
+    file: "/app/backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added GET /api/goals (returns saved goals or defaults from user profile) and POST /api/goals (upserts goals + syncs goal_weight_kg/fitness_goal back to user). Requires auth. Body: {primary_goal, target_weight_kg?, weekly_workout_days?, daily_steps_goal?, daily_water_goal?, target_date?}"
+      - working: false
+        agent: "testing"
+        comment: "Tested via /app/backend_test.py against EXPO_PUBLIC_BACKEND_URL/api with a freshly registered user (sarah.morgan+<rand>@fitmail.test / Str0ngPass!2026). 7/8 assertions pass: (1) GET /api/goals on a brand-new user returns defaults exactly as required (primary_goal='lose_weight', target_weight_kg=null, weekly_workout_days=3, daily_steps_goal=10000, daily_water_goal=8, target_date=null, is_set=false). (2) POST /api/goals with build_muscle/75.5/5/12000/10 returns 200 and 'Goals updated successfully'. (3) Subsequent GET /api/goals returns is_set=true with all five posted values intact. (4) Partial POST {primary_goal: 'stay_fit'} upserts without error and following GET shows primary_goal='stay_fit' with weekly_workout_days/daily_steps_goal/daily_water_goal correctly defaulted back to 3/10000/8 (Optional+ `or` fallback in handler works). (5) Unauthenticated GET /api/goals returns 403 (acceptable per spec '401/403'). FAILURE: GET /api/auth/me does NOT reflect fitness_goal sync — it still returns 'lose_weight' even after POST /api/goals with primary_goal='build_muscle'. goal_weight_kg sync to 75.5 IS reflected. Root cause: in server.py get_me() (lines 277-294), the UserProfile is constructed WITHOUT passing fitness_goal=user.get('fitness_goal'), so the Pydantic default ('lose_weight') is always returned. The underlying DB user document IS updated correctly by POST /api/goals (verified indirectly via goal_weight_kg coming through). Fix: add `fitness_goal=user.get('fitness_goal')` to the UserProfile(...) construction in get_me()."
+
+  - task: "Local Backend - Auth Register/Login"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Already validated by previous testing run."
+
+  - task: "Local Backend - Steps Logging (POST /api/steps)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Used by dashboard pedometer sync. Already validated."
+
+  - task: "Local Backend - Weekly Report (GET /api/reports/weekly)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Returns 7-day summary, daily breakdown and achievements. Validated previously."
+
+frontend:
+  - task: "Goal Selection Onboarding Screen"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/goal-selection.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "After register, navigates to /goal-selection?from=register. Lets user pick primary goal, target weight, workout frequency, and daily targets. Calls POST /api/goals."
+
+  - task: "Pedometer / Step Tracking on Dashboard"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/services/pedometer.ts and /app/frontend/app/(tabs)/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Uses expo-sensors Pedometer to fetch today's step count, watch live updates, and POST to /api/steps every 60s. Disabled on web (Platform.OS === 'web' guard)."
+
+  - task: "Meal Reminders (Push Notifications)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/services/notifications.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Schedules 3 daily reminders: Breakfast 10AM, Lunch 2PM, Dinner 9PM. Auto-scheduled on first dashboard mount. Toggle from Profile > Other > Meal Reminders."
+
+  - task: "Weekly Report Screen"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/weekly-report.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Shows hero card with workouts/calories/weight, achievements list, summary grid, hydration bar chart, workouts list. Accessible from dashboard top-right and from Profile menu."
+
+  - task: "Wired meal-logger & progress-photos in dashboard quick actions"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/index.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Quick actions row converted to horizontal scroll with 7 actions: Log Meal, Workout, Sleep, Diet Plan, Photos, Progress, Report. Also added entries in Profile menu for Goals, Photos, Weekly Report."
+
+metadata:
+  created_by: "main_agent"
+  version: "2.1"
+  test_sequence: 3
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Local Backend - Goals Endpoints (GET/POST /api/goals)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Added P0 MVP features: Goal Selection Onboarding screen (post-register), Pedometer/steps integration, Meal Reminders (10AM/2PM/9PM), Weekly Reports UI, and wired meal-logger/progress-photos into dashboard and profile menus. Backend: New /api/goals endpoint added. Please test ONLY GET /api/goals (defaults for new user) and POST /api/goals (verify upsert + that POSTed primary_goal updates user.fitness_goal and target_weight_kg updates user.goal_weight_kg). Use a fresh registered user. Auth via JWT Bearer token from /api/auth/register."
+  - agent: "testing"
+    message: "Goals endpoints tested via /app/backend_test.py. 7/8 assertions pass — defaults, set, read-back, partial upsert, and unauthenticated 403 all behave correctly. ONE FAILURE: GET /api/auth/me does not return the synced fitness_goal after POST /api/goals (still shows 'lose_weight' after primary_goal='build_muscle'). goal_weight_kg syncs through fine. Root cause is in get_me() in /app/backend/server.py (lines 277-294): UserProfile is constructed without fitness_goal=user.get('fitness_goal'), so the Pydantic default ('lose_weight') is always returned. Fix: pass fitness_goal=user.get('fitness_goal') in the UserProfile(...) call. /app/memory/test_credentials.md updated with the fresh test user."
 
 backend:
   - task: "External API Integration - Authentication (Login/Register)"

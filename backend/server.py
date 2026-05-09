@@ -50,6 +50,7 @@ class UserCreate(BaseModel):
     weight_kg: Optional[float] = None
     goal_weight_kg: Optional[float] = None
     activity_level: Optional[str] = "moderate"  # sedentary, light, moderate, active, very_active
+    fitness_goal: Optional[str] = "lose_weight"  # lose_weight, build_muscle, stay_fit, improve_health
 
 class UserLogin(BaseModel):
     email: str
@@ -65,6 +66,7 @@ class UserProfile(BaseModel):
     weight_kg: Optional[float] = None
     goal_weight_kg: Optional[float] = None
     activity_level: Optional[str] = "moderate"
+    fitness_goal: Optional[str] = "lose_weight"
     bmi: Optional[float] = None
     daily_calorie_goal: Optional[int] = None
     created_at: datetime
@@ -114,6 +116,25 @@ class MealLog(BaseModel):
 
 class CoachConnect(BaseModel):
     coach_code: str
+
+class ProgressPhoto(BaseModel):
+    photo_base64: str
+    photo_type: Optional[str] = "front"  # front, back, side
+    notes: Optional[str] = None
+
+class NotificationSettings(BaseModel):
+    water_reminders: Optional[bool] = True
+    meal_reminders: Optional[bool] = True
+    workout_reminders: Optional[bool] = True
+    reminder_times: Optional[List[str]] = None  # List of HH:MM times
+
+class GoalSettings(BaseModel):
+    primary_goal: str  # lose_weight, build_muscle, stay_fit, improve_health
+    target_weight_kg: Optional[float] = None
+    weekly_workout_days: Optional[int] = 3
+    daily_steps_goal: Optional[int] = 10000
+    daily_water_goal: Optional[int] = 8
+    target_date: Optional[str] = None  # YYYY-MM-DD
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -775,6 +796,280 @@ async def disconnect_coach(user: dict = Depends(get_current_user)):
         {"$set": {"coach_code": None}}
     )
     return {"message": "Disconnected from coach"}
+
+# ==================== PROGRESS PHOTOS ====================
+
+@api_router.post("/progress-photo")
+async def upload_progress_photo(data: ProgressPhoto, user: dict = Depends(get_current_user)):
+    """Upload a progress photo"""
+    photo_data = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "photo_base64": data.photo_base64,
+        "photo_type": data.photo_type,
+        "notes": data.notes,
+        "date": date.today().isoformat(),
+        "created_at": datetime.utcnow()
+    }
+    await db.progress_photos.insert_one(photo_data)
+    return {"message": "Photo uploaded successfully", "id": photo_data["id"]}
+
+@api_router.get("/progress-photos")
+async def get_progress_photos(user: dict = Depends(get_current_user)):
+    """Get all progress photos"""
+    photos = await db.progress_photos.find(
+        {"user_id": user["id"]}
+    ).sort("created_at", -1).to_list(50)
+    
+    return {
+        "photos": [{
+            "id": p["id"],
+            "photo_type": p.get("photo_type", "front"),
+            "photo_base64": p["photo_base64"],
+            "date": p["date"],
+            "notes": p.get("notes")
+        } for p in photos]
+    }
+
+@api_router.delete("/progress-photo/{photo_id}")
+async def delete_progress_photo(photo_id: str, user: dict = Depends(get_current_user)):
+    """Delete a progress photo"""
+    result = await db.progress_photos.delete_one({"id": photo_id, "user_id": user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return {"message": "Photo deleted"}
+
+# ==================== WEEKLY REPORTS ====================
+
+@api_router.get("/reports/weekly")
+async def get_weekly_report(user: dict = Depends(get_current_user)):
+    """Get weekly progress report"""
+    today = date.today()
+    week_start = (today - timedelta(days=7)).isoformat()
+    week_end = today.isoformat()
+    
+    # Get this week's data
+    weights = await db.weight_logs.find({
+        "user_id": user["id"],
+        "date": {"$gte": week_start, "$lte": week_end}
+    }).sort("date", 1).to_list(7)
+    
+    workouts = await db.workout_logs.find({
+        "user_id": user["id"],
+        "date": {"$gte": week_start, "$lte": week_end}
+    }).to_list(20)
+    
+    sleep_logs = await db.sleep_logs.find({
+        "user_id": user["id"],
+        "date": {"$gte": week_start, "$lte": week_end}
+    }).to_list(7)
+    
+    water_logs = await db.water_logs.find({
+        "user_id": user["id"],
+        "date": {"$gte": week_start, "$lte": week_end}
+    }).to_list(7)
+    
+    meals = await db.meal_logs.find({
+        "user_id": user["id"],
+        "date": {"$gte": week_start, "$lte": week_end}
+    }).to_list(50)
+    
+    # Calculate stats
+    total_workouts = len(workouts)
+    total_workout_mins = sum(w.get("duration_mins", 0) for w in workouts)
+    total_calories_burned = sum(w.get("calories_burned", 0) for w in workouts)
+    
+    avg_sleep = 0
+    if sleep_logs:
+        sleep_hours = []
+        for log in sleep_logs:
+            hours = calculate_sleep_hours(log)
+            if hours > 0:
+                sleep_hours.append(hours)
+        if sleep_hours:
+            avg_sleep = round(sum(sleep_hours) / len(sleep_hours), 1)
+    
+    avg_water = 0
+    if water_logs:
+        avg_water = round(sum(w.get("glasses", 0) for w in water_logs) / len(water_logs), 1)
+    
+    total_calories_consumed = sum(m.get("total_calories", 0) for m in meals)
+    avg_daily_calories = round(total_calories_consumed / 7) if total_calories_consumed > 0 else 0
+    
+    weight_change = 0
+    if len(weights) >= 2:
+        weight_change = round(weights[-1]["weight_kg"] - weights[0]["weight_kg"], 1)
+    
+    return {
+        "period": {
+            "start": week_start,
+            "end": week_end
+        },
+        "summary": {
+            "workouts_completed": total_workouts,
+            "total_workout_minutes": total_workout_mins,
+            "calories_burned": total_calories_burned,
+            "avg_sleep_hours": avg_sleep,
+            "avg_water_glasses": avg_water,
+            "avg_daily_calories": avg_daily_calories,
+            "weight_change": weight_change
+        },
+        "daily_breakdown": {
+            "weights": [{"date": w["date"], "weight": w["weight_kg"]} for w in weights],
+            "workouts": [{"date": w["date"], "type": w["workout_type"], "duration": w["duration_mins"]} for w in workouts],
+            "water": [{"date": w["date"], "glasses": w["glasses"]} for w in water_logs]
+        },
+        "achievements": get_weekly_achievements(total_workouts, avg_water, avg_sleep, weight_change)
+    }
+
+def get_weekly_achievements(workouts: int, water: float, sleep: float, weight_change: float) -> List[dict]:
+    """Generate achievements based on weekly stats"""
+    achievements = []
+    
+    if workouts >= 5:
+        achievements.append({"icon": "trophy", "title": "Workout Warrior", "desc": "5+ workouts this week!"})
+    elif workouts >= 3:
+        achievements.append({"icon": "fitness", "title": "Active Week", "desc": "3+ workouts completed"})
+    
+    if water >= 7:
+        achievements.append({"icon": "water", "title": "Hydration Hero", "desc": "Avg 7+ glasses daily"})
+    
+    if sleep >= 7:
+        achievements.append({"icon": "moon", "title": "Sleep Champion", "desc": "Avg 7+ hours sleep"})
+    
+    if weight_change < 0:
+        achievements.append({"icon": "trending-down", "title": "Weight Loss", "desc": f"{abs(weight_change)}kg lost this week!"})
+    
+    return achievements
+
+# ==================== NOTIFICATION SETTINGS ====================
+
+@api_router.get("/settings/notifications")
+async def get_notification_settings(user: dict = Depends(get_current_user)):
+    """Get notification settings"""
+    settings = await db.notification_settings.find_one({"user_id": user["id"]})
+    if not settings:
+        # Return defaults
+        return {
+            "water_reminders": True,
+            "meal_reminders": True,
+            "workout_reminders": True,
+            "reminder_times": ["08:00", "12:00", "18:00", "20:00"]
+        }
+    return {
+        "water_reminders": settings.get("water_reminders", True),
+        "meal_reminders": settings.get("meal_reminders", True),
+        "workout_reminders": settings.get("workout_reminders", True),
+        "reminder_times": settings.get("reminder_times", ["08:00", "12:00", "18:00", "20:00"])
+    }
+
+@api_router.put("/settings/notifications")
+async def update_notification_settings(data: NotificationSettings, user: dict = Depends(get_current_user)):
+    """Update notification settings"""
+    settings_data = {
+        "user_id": user["id"],
+        "water_reminders": data.water_reminders,
+        "meal_reminders": data.meal_reminders,
+        "workout_reminders": data.workout_reminders,
+        "reminder_times": data.reminder_times or ["08:00", "12:00", "18:00", "20:00"],
+        "updated_at": datetime.utcnow()
+    }
+    
+    await db.notification_settings.update_one(
+        {"user_id": user["id"]},
+        {"$set": settings_data},
+        upsert=True
+    )
+    return {"message": "Settings updated"}
+
+# ==================== GOALS ENDPOINTS ====================
+
+@api_router.get("/goals")
+async def get_goals(user: dict = Depends(get_current_user)):
+    """Get user's fitness goals"""
+    goals = await db.goals.find_one({"user_id": user["id"]})
+    if not goals:
+        return {
+            "primary_goal": user.get("fitness_goal", "lose_weight"),
+            "target_weight_kg": user.get("goal_weight_kg"),
+            "weekly_workout_days": 3,
+            "daily_steps_goal": 10000,
+            "daily_water_goal": 8,
+            "target_date": None,
+            "is_set": False,
+        }
+    return {
+        "primary_goal": goals.get("primary_goal"),
+        "target_weight_kg": goals.get("target_weight_kg"),
+        "weekly_workout_days": goals.get("weekly_workout_days", 3),
+        "daily_steps_goal": goals.get("daily_steps_goal", 10000),
+        "daily_water_goal": goals.get("daily_water_goal", 8),
+        "target_date": goals.get("target_date"),
+        "is_set": True,
+    }
+
+@api_router.post("/goals")
+async def set_goals(data: GoalSettings, user: dict = Depends(get_current_user)):
+    """Set or update user's fitness goals"""
+    goal_data = {
+        "user_id": user["id"],
+        "primary_goal": data.primary_goal,
+        "target_weight_kg": data.target_weight_kg,
+        "weekly_workout_days": data.weekly_workout_days or 3,
+        "daily_steps_goal": data.daily_steps_goal or 10000,
+        "daily_water_goal": data.daily_water_goal or 8,
+        "target_date": data.target_date,
+        "updated_at": datetime.utcnow(),
+    }
+    
+    await db.goals.update_one(
+        {"user_id": user["id"]},
+        {"$set": goal_data},
+        upsert=True
+    )
+    
+    # Also update user record
+    user_updates = {"fitness_goal": data.primary_goal}
+    if data.target_weight_kg:
+        user_updates["goal_weight_kg"] = data.target_weight_kg
+    await db.users.update_one({"id": user["id"]}, {"$set": user_updates})
+    
+    return {"message": "Goals updated successfully", "goals": goal_data}
+
+# ==================== FOOD DATABASE ====================
+
+@api_router.get("/foods/search")
+async def search_foods(q: str = ""):
+    """Search food database"""
+    # Simple food database for MVP
+    foods = [
+        {"name": "Apple", "calories": 95, "protein": 0.5, "carbs": 25, "fat": 0.3, "serving": "1 medium"},
+        {"name": "Banana", "calories": 105, "protein": 1.3, "carbs": 27, "fat": 0.4, "serving": "1 medium"},
+        {"name": "Chicken Breast", "calories": 165, "protein": 31, "carbs": 0, "fat": 3.6, "serving": "100g"},
+        {"name": "Brown Rice", "calories": 216, "protein": 5, "carbs": 45, "fat": 1.8, "serving": "1 cup cooked"},
+        {"name": "Egg", "calories": 78, "protein": 6, "carbs": 0.6, "fat": 5, "serving": "1 large"},
+        {"name": "Greek Yogurt", "calories": 100, "protein": 17, "carbs": 6, "fat": 0.7, "serving": "170g"},
+        {"name": "Salmon", "calories": 208, "protein": 20, "carbs": 0, "fat": 13, "serving": "100g"},
+        {"name": "Broccoli", "calories": 55, "protein": 3.7, "carbs": 11, "fat": 0.6, "serving": "1 cup"},
+        {"name": "Oatmeal", "calories": 154, "protein": 5, "carbs": 27, "fat": 2.6, "serving": "1 cup cooked"},
+        {"name": "Almonds", "calories": 164, "protein": 6, "carbs": 6, "fat": 14, "serving": "1 oz (23 nuts)"},
+        {"name": "Sweet Potato", "calories": 103, "protein": 2.3, "carbs": 24, "fat": 0.1, "serving": "1 medium"},
+        {"name": "Spinach", "calories": 7, "protein": 0.9, "carbs": 1.1, "fat": 0.1, "serving": "1 cup raw"},
+        {"name": "Tuna", "calories": 132, "protein": 29, "carbs": 0, "fat": 1, "serving": "100g"},
+        {"name": "Avocado", "calories": 160, "protein": 2, "carbs": 9, "fat": 15, "serving": "1/2 fruit"},
+        {"name": "Whole Wheat Bread", "calories": 81, "protein": 4, "carbs": 14, "fat": 1, "serving": "1 slice"},
+        {"name": "Milk (2%)", "calories": 122, "protein": 8, "carbs": 12, "fat": 5, "serving": "1 cup"},
+        {"name": "Cottage Cheese", "calories": 163, "protein": 28, "carbs": 6, "fat": 2.3, "serving": "1 cup"},
+        {"name": "Turkey Breast", "calories": 135, "protein": 30, "carbs": 0, "fat": 1, "serving": "100g"},
+        {"name": "Quinoa", "calories": 222, "protein": 8, "carbs": 39, "fat": 3.5, "serving": "1 cup cooked"},
+        {"name": "Orange", "calories": 62, "protein": 1.2, "carbs": 15, "fat": 0.2, "serving": "1 medium"},
+    ]
+    
+    if q:
+        q_lower = q.lower()
+        foods = [f for f in foods if q_lower in f["name"].lower()]
+    
+    return {"foods": foods}
 
 # ==================== ROOT ENDPOINT ====================
 

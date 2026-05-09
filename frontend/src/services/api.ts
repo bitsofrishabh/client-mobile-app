@@ -208,4 +208,75 @@ export const coachAPI = {
   },
 };
 
+// Progress Photos endpoints
+export const progressPhotosAPI = {
+  upload: async (photo_base64: string, photo_type?: string, notes?: string) => {
+    const response = await api.post('/progress-photo', { photo_base64, photo_type, notes });
+    return response.data;
+  },
+
+  getAll: async () => {
+    const response = await api.get('/progress-photos');
+    return response.data;
+  },
+
+  delete: async (photoId: string) => {
+    const response = await api.delete(`/progress-photo/${photoId}`);
+    return response.data;
+  },
+};
+
+// Weekly Reports endpoint
+export const reportsAPI = {
+  getWeekly: async () => {
+    const response = await api.get('/reports/weekly');
+    return response.data;
+  },
+};
+
+// Goals endpoints
+export const goalsAPI = {
+  get: async () => {
+    const response = await api.get('/goals');
+    return response.data;
+  },
+  set: async (data: {
+    primary_goal: string;
+    target_weight_kg?: number;
+    weekly_workout_days?: number;
+    daily_steps_goal?: number;
+    daily_water_goal?: number;
+    target_date?: string;
+  }) => {
+    const response = await api.post('/goals', data);
+    return response.data;
+  },
+};
+
+// Notification Settings endpoints
+export const settingsAPI = {
+  getNotifications: async () => {
+    const response = await api.get('/settings/notifications');
+    return response.data;
+  },
+
+  updateNotifications: async (data: {
+    water_reminders?: boolean;
+    meal_reminders?: boolean;
+    workout_reminders?: boolean;
+    reminder_times?: string[];
+  }) => {
+    const response = await api.put('/settings/notifications', data);
+    return response.data;
+  },
+};
+
+// Food Search endpoint
+export const foodsAPI = {
+  search: async (query: string) => {
+    const response = await api.get('/foods/search', { params: { q: query } });
+    return response.data;
+  },
+};
+
 export default api;

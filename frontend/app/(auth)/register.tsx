@@ -103,7 +103,7 @@ export default function Register() {
         goal_weight_kg: goalWeight ? parseFloat(goalWeight) : undefined,
         activity_level: activityLevel,
       });
-      router.replace('/(tabs)');
+      router.replace('/goal-selection?from=register');
     } catch (error: any) {
       console.error('Registration error:', error);
       const detail = error.response?.data?.detail;

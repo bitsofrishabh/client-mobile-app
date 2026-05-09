@@ -17,6 +17,11 @@ import { packagesAPI } from '../../src/services/api';
 import { Card } from '../../src/components/Card';
 import { GradientButton } from '../../src/components/GradientButton';
 import { Colors, Gradients, Spacing, BorderRadius, Shadow } from '../../src/constants/theme';
+import {
+  scheduleMealReminders,
+  cancelMealReminders,
+  areMealRemindersScheduled,
+} from '../../src/services/notifications';
 
 interface Package {
   id: string;
@@ -33,9 +38,14 @@ export default function ProfileScreen() {
   const [showPackagesModal, setShowPackagesModal] = useState(false);
   const [packages, setPackages] = useState<Package[]>([]);
   const [subscribing, setSubscribing] = useState(false);
+  const [mealRemindersOn, setMealRemindersOn] = useState(false);
 
   useEffect(() => {
     fetchPackages();
+    (async () => {
+      const on = await areMealRemindersScheduled();
+      setMealRemindersOn(on);
+    })();
   }, []);
 
   const fetchPackages = async () => {
@@ -75,6 +85,28 @@ export default function ProfileScreen() {
     }
   };
 
+  const toggleMealReminders = async () => {
+    if (mealRemindersOn) {
+      await cancelMealReminders();
+      setMealRemindersOn(false);
+      Alert.alert('Reminders Off', 'Meal reminders have been disabled.');
+    } else {
+      const ok = await scheduleMealReminders();
+      if (ok) {
+        setMealRemindersOn(true);
+        Alert.alert(
+          'Reminders On',
+          'You will receive meal reminders at 10:00 AM (Breakfast), 2:00 PM (Lunch), and 9:00 PM (Dinner).'
+        );
+      } else {
+        Alert.alert(
+          'Permission Required',
+          'Please enable notifications in settings to receive meal reminders.'
+        );
+      }
+    }
+  };
+
   const currentPackage = packages.find((p) => p.id === user?.package_id);
 
   const menuItems = [
@@ -82,9 +114,10 @@ export default function ProfileScreen() {
       title: 'Account',
       items: [
         { icon: 'person-outline', label: 'Personal Data', onPress: () => {} },
-        { icon: 'trophy-outline', label: 'Achievement', onPress: () => {} },
-        { icon: 'time-outline', label: 'Activity History', onPress: () => {} },
-        { icon: 'bar-chart-outline', label: 'Progress', onPress: () => router.push('/(tabs)/progress') },
+        { icon: 'flag-outline', label: 'My Goals', onPress: () => router.push('/goal-selection') },
+        { icon: 'camera-outline', label: 'Progress Photos', onPress: () => router.push('/progress-photos') },
+        { icon: 'bar-chart-outline', label: 'Weekly Report', onPress: () => router.push('/weekly-report') },
+        { icon: 'time-outline', label: 'Activity History', onPress: () => router.push('/(tabs)/progress') },
       ],
     },
     {
@@ -101,9 +134,13 @@ export default function ProfileScreen() {
     {
       title: 'Other',
       items: [
-        { icon: 'notifications-outline', label: 'Notifications', onPress: () => {} },
+        {
+          icon: 'notifications-outline',
+          label: 'Meal Reminders',
+          sublabel: mealRemindersOn ? 'On (10 AM, 2 PM, 9 PM)' : 'Off — Tap to enable',
+          onPress: toggleMealReminders,
+        },
         { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => {} },
-        { icon: 'settings-outline', label: 'Settings', onPress: () => {} },
         { icon: 'help-circle-outline', label: 'Help & Support', onPress: () => {} },
       ],
     },

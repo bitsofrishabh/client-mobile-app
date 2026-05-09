@@ -1,386 +1,207 @@
-#!/usr/bin/env python3
 """
-Backend API Integration Tests for DietTracker Pro
-Testing external API at https://pdf-platform-1.preview.emergentagent.com/api
+Backend tests for Goals endpoints (/api/goals).
+Tests against the public preview URL using EXPO_PUBLIC_BACKEND_URL + /api.
 """
-
-import requests
+import sys
 import json
 import uuid
-from datetime import datetime
+import requests
+from pathlib import Path
 
-class DietTrackerAPITester:
-    def __init__(self):
-        self.base_url = "https://pdf-platform-1.preview.emergentagent.com/api"
-        self.invite_code = "8F809C22"
-        self.access_token = None
-        self.user_data = None
-        self.test_results = []
-        
-        # Generate unique test user data
-        unique_id = str(uuid.uuid4())[:8]
-        self.test_user = {
-            "name": f"Test User {unique_id}",
-            "email": f"testuser{unique_id}@example.com",
-            "password": "TestPass123!",
-            "invite_code": self.invite_code,
-            "role": "client"
-        }
-    
-    def log_result(self, test_name, success, message, response_data=None):
-        """Log test result"""
-        result = {
-            "test": test_name,
-            "success": success,
-            "message": message,
-            "timestamp": datetime.now().isoformat()
-        }
-        if response_data:
-            result["response_data"] = response_data
-        self.test_results.append(result)
-        
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status} {test_name}: {message}")
-        if response_data and not success:
-            print(f"   Response: {json.dumps(response_data, indent=2)}")
-    
-    def test_user_registration(self):
-        """Test user registration endpoint"""
-        try:
-            url = f"{self.base_url}/auth/register"
-            response = requests.post(url, json=self.test_user, timeout=10)
-            
-            print(f"\n--- Testing User Registration ---")
-            print(f"POST {url}")
-            print(f"Payload: {json.dumps(self.test_user, indent=2)}")
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 201 or response.status_code == 200:
-                data = response.json()
-                self.log_result("User Registration", True, "User registered successfully", data)
-                return True
-            elif response.status_code == 409:
-                # User already exists - this is fine for testing
-                data = response.json() if response.text else {}
-                self.log_result("User Registration", True, "User already exists (409) - proceeding with login", data)
-                return True
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("User Registration", False, f"Registration failed with status {response.status_code}", data)
-                return False
-                
-        except Exception as e:
-            self.log_result("User Registration", False, f"Exception occurred: {str(e)}")
-            return False
-    
-    def test_user_login(self):
-        """Test user login endpoint"""
-        try:
-            url = f"{self.base_url}/auth/login"
-            login_data = {
-                "email": self.test_user["email"],
-                "password": self.test_user["password"]
-            }
-            
-            print(f"\n--- Testing User Login ---")
-            print(f"POST {url}")
-            print(f"Payload: {json.dumps(login_data, indent=2)}")
-            
-            response = requests.post(url, json=login_data, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "access_token" in data:
-                    self.access_token = data["access_token"]
-                    self.user_data = data.get("user", {})
-                    self.log_result("User Login", True, "Login successful, token received", data)
-                    return True
-                else:
-                    self.log_result("User Login", False, "Login response missing access_token", data)
-                    return False
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("User Login", False, f"Login failed with status {response.status_code}", data)
-                return False
-                
-        except Exception as e:
-            self.log_result("User Login", False, f"Exception occurred: {str(e)}")
-            return False
-    
-    def test_get_current_user(self):
-        """Test get current user endpoint"""
-        if not self.access_token:
-            self.log_result("Get Current User", False, "No access token available")
-            return False
-            
-        try:
-            url = f"{self.base_url}/auth/me"
-            headers = {"Authorization": f"Bearer {self.access_token}"}
-            
-            print(f"\n--- Testing Get Current User ---")
-            print(f"GET {url}")
-            print(f"Headers: Authorization: Bearer {self.access_token[:20]}...")
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log_result("Get Current User", True, "User data retrieved successfully", data)
-                return True
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("Get Current User", False, f"Failed with status {response.status_code}", data)
-                return False
-                
-        except Exception as e:
-            self.log_result("Get Current User", False, f"Exception occurred: {str(e)}")
-            return False
-    
-    def test_client_dashboard(self):
-        """Test client dashboard endpoint"""
-        if not self.access_token:
-            self.log_result("Client Dashboard", False, "No access token available")
-            return False
-            
-        try:
-            url = f"{self.base_url}/client/dashboard"
-            headers = {"Authorization": f"Bearer {self.access_token}"}
-            
-            print(f"\n--- Testing Client Dashboard ---")
-            print(f"GET {url}")
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log_result("Client Dashboard", True, "Dashboard data retrieved successfully", data)
-                return True
-            elif response.status_code == 404:
-                data = response.json() if response.text else {}
-                # This might be expected if client profile not found
-                self.log_result("Client Dashboard", True, "Client profile not found (404) - expected until coach adds client", data)
-                return True
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("Client Dashboard", False, f"Failed with status {response.status_code}", data)
-                return False
-                
-        except Exception as e:
-            self.log_result("Client Dashboard", False, f"Exception occurred: {str(e)}")
-            return False
-    
-    def test_weight_logging(self):
-        """Test weight logging endpoints"""
-        if not self.access_token:
-            self.log_result("Weight Logging", False, "No access token available")
-            return False
-            
-        headers = {"Authorization": f"Bearer {self.access_token}"}
-        
-        try:
-            # First, get current weights
-            url = f"{self.base_url}/client/weights"
-            
-            print(f"\n--- Testing Get Weight History ---")
-            print(f"GET {url}")
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log_result("Get Weight History", True, "Weight history retrieved successfully", data)
-            elif response.status_code == 404:
-                data = response.json() if response.text else {}
-                self.log_result("Get Weight History", True, "No weight history found (404) - expected for new user", data)
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("Get Weight History", False, f"Failed with status {response.status_code}", data)
-            
-            # Now, log a new weight
-            url = f"{self.base_url}/client/weight"
-            weight_data = {"weight_kg": 75.5}
-            
-            print(f"\n--- Testing Log Weight ---")
-            print(f"POST {url}")
-            print(f"Payload: {json.dumps(weight_data, indent=2)}")
-            
-            response = requests.post(url, json=weight_data, headers=headers, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 201 or response.status_code == 200:
-                data = response.json()
-                self.log_result("Log Weight", True, "Weight logged successfully", data)
-                return True
-            elif response.status_code == 404:
-                data = response.json() if response.text else {}
-                self.log_result("Log Weight", True, "Client profile not found (404) - expected until coach adds client", data)
-                return True
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("Log Weight", False, f"Failed with status {response.status_code}", data)
-                return False
-                
-        except Exception as e:
-            self.log_result("Weight Logging", False, f"Exception occurred: {str(e)}")
-            return False
-    
-    def test_checkin(self):
-        """Test check-in endpoints"""
-        if not self.access_token:
-            self.log_result("Check-in", False, "No access token available")
-            return False
-            
-        headers = {"Authorization": f"Bearer {self.access_token}"}
-        
-        try:
-            # First, get today's check-in
-            url = f"{self.base_url}/client/checkin/today"
-            
-            print(f"\n--- Testing Get Today's Check-in ---")
-            print(f"GET {url}")
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log_result("Get Today's Check-in", True, "Today's check-in retrieved successfully", data)
-            elif response.status_code == 404:
-                data = response.json() if response.text else {}
-                self.log_result("Get Today's Check-in", True, "No check-in for today (404) - expected for new check-in", data)
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("Get Today's Check-in", False, f"Failed with status {response.status_code}", data)
-            
-            # Now, submit a check-in
-            url = f"{self.base_url}/client/checkin"
-            checkin_data = {
-                "meals": [
-                    {"meal_name": "Breakfast", "completed": True},
-                    {"meal_name": "Lunch", "completed": True},
-                    {"meal_name": "Dinner", "completed": False}
-                ],
-                "water_glasses": 6,
-                "mood": "good",
-                "notes": "Had a great day with healthy meals!"
-            }
-            
-            print(f"\n--- Testing Submit Check-in ---")
-            print(f"POST {url}")
-            print(f"Payload: {json.dumps(checkin_data, indent=2)}")
-            
-            response = requests.post(url, json=checkin_data, headers=headers, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 201 or response.status_code == 200:
-                data = response.json()
-                self.log_result("Submit Check-in", True, "Check-in submitted successfully", data)
-                return True
-            elif response.status_code == 404:
-                data = response.json() if response.text else {}
-                self.log_result("Submit Check-in", True, "Client profile not found (404) - expected until coach adds client", data)
-                return True
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("Submit Check-in", False, f"Failed with status {response.status_code}", data)
-                return False
-                
-        except Exception as e:
-            self.log_result("Check-in", False, f"Exception occurred: {str(e)}")
-            return False
-    
-    def test_diet_plan(self):
-        """Test diet plan endpoint"""
-        if not self.access_token:
-            self.log_result("Diet Plan", False, "No access token available")
-            return False
-            
-        try:
-            url = f"{self.base_url}/client/diet-plan"
-            headers = {"Authorization": f"Bearer {self.access_token}"}
-            
-            print(f"\n--- Testing Get Diet Plan ---")
-            print(f"GET {url}")
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            print(f"Status Code: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log_result("Diet Plan", True, "Diet plan retrieved successfully", data)
-                return True
-            elif response.status_code == 404:
-                data = response.json() if response.text else {}
-                self.log_result("Diet Plan", True, "Diet plan not found (404) - expected until coach assigns plan", data)
-                return True
-            else:
-                data = response.json() if response.text else {}
-                self.log_result("Diet Plan", False, f"Failed with status {response.status_code}", data)
-                return False
-                
-        except Exception as e:
-            self.log_result("Diet Plan", False, f"Exception occurred: {str(e)}")
-            return False
-    
-    def run_all_tests(self):
-        """Run all API tests in sequence"""
-        print("=" * 80)
-        print("DIETTRACKER PRO - EXTERNAL API INTEGRATION TESTS")
-        print("=" * 80)
-        print(f"Base URL: {self.base_url}")
-        print(f"Test User: {self.test_user['email']}")
-        print(f"Invite Code: {self.invite_code}")
-        print("=" * 80)
-        
-        # Test sequence
-        tests = [
-            ("Authentication - Register", self.test_user_registration),
-            ("Authentication - Login", self.test_user_login),
-            ("Authentication - Get Current User", self.test_get_current_user),
-            ("Client Dashboard", self.test_client_dashboard),
-            ("Weight Logging", self.test_weight_logging),
-            ("Check-in", self.test_checkin),
-            ("Diet Plan", self.test_diet_plan)
-        ]
-        
-        passed = 0
-        failed = 0
-        
-        for test_name, test_func in tests:
-            try:
-                success = test_func()
-                if success:
-                    passed += 1
-                else:
-                    failed += 1
-            except Exception as e:
-                print(f"❌ FAIL {test_name}: Unexpected error - {str(e)}")
-                failed += 1
-        
-        # Summary
-        print("\n" + "=" * 80)
-        print("TEST SUMMARY")
-        print("=" * 80)
-        print(f"Total Tests: {passed + failed}")
-        print(f"Passed: {passed}")
-        print(f"Failed: {failed}")
-        print(f"Success Rate: {(passed / (passed + failed) * 100):.1f}%")
-        
-        # Detailed results
-        print("\nDETAILED RESULTS:")
-        for result in self.test_results:
-            status = "✅" if result["success"] else "❌"
-            print(f"{status} {result['test']}: {result['message']}")
-        
-        return passed, failed
+# Read EXPO_PUBLIC_BACKEND_URL from frontend/.env
+FRONTEND_ENV = Path("/app/frontend/.env")
+BACKEND_URL = None
+for line in FRONTEND_ENV.read_text().splitlines():
+    if line.startswith("EXPO_PUBLIC_BACKEND_URL="):
+        BACKEND_URL = line.split("=", 1)[1].strip().strip('"').strip("'")
+        break
+
+assert BACKEND_URL, "EXPO_PUBLIC_BACKEND_URL not found in /app/frontend/.env"
+API = f"{BACKEND_URL}/api"
+print(f"Using API base: {API}")
+
+results = []
+
+
+def record(name, ok, detail=""):
+    status = "PASS" if ok else "FAIL"
+    results.append((name, ok, detail))
+    print(f"[{status}] {name} :: {detail}")
+
+
+def main():
+    # ---------- Step 1: Register ----------
+    suffix = uuid.uuid4().hex[:8]
+    email = f"sarah.morgan+{suffix}@fitmail.test"
+    password = "Str0ngPass!2026"
+    register_payload = {
+        "name": "Sarah Morgan",
+        "email": email,
+        "password": password,
+        "age": 29,
+        "gender": "female",
+        "height_cm": 168.0,
+        "weight_kg": 82.4,
+    }
+
+    try:
+        r = requests.post(f"{API}/auth/register", json=register_payload, timeout=30)
+    except Exception as e:
+        record("POST /api/auth/register", False, f"network error: {e}")
+        return
+
+    if r.status_code != 200:
+        record("POST /api/auth/register", False, f"HTTP {r.status_code}: {r.text[:200]}")
+        return
+    body = r.json()
+    token = body.get("access_token")
+    if not token:
+        record("POST /api/auth/register", False, f"no access_token in body: {body}")
+        return
+    record("POST /api/auth/register", True, f"user_id={body.get('user', {}).get('id')}")
+    auth_headers = {"Authorization": f"Bearer {token}"}
+
+    # ---------- Step 2: GET /api/goals (defaults for new user) ----------
+    r = requests.get(f"{API}/goals", headers=auth_headers, timeout=30)
+    if r.status_code != 200:
+        record("GET /api/goals (defaults)", False, f"HTTP {r.status_code}: {r.text[:200]}")
+        return
+    g = r.json()
+    expected_defaults = {
+        "primary_goal": "lose_weight",
+        "target_weight_kg": None,
+        "weekly_workout_days": 3,
+        "daily_steps_goal": 10000,
+        "daily_water_goal": 8,
+        "target_date": None,
+        "is_set": False,
+    }
+    mismatches = []
+    for k, v in expected_defaults.items():
+        if g.get(k) != v:
+            mismatches.append(f"{k} expected={v!r} got={g.get(k)!r}")
+    if mismatches:
+        record("GET /api/goals (defaults)", False, "; ".join(mismatches))
+    else:
+        record("GET /api/goals (defaults)", True, json.dumps(g))
+
+    # ---------- Step 3: POST /api/goals (set goals) ----------
+    set_payload = {
+        "primary_goal": "build_muscle",
+        "target_weight_kg": 75.5,
+        "weekly_workout_days": 5,
+        "daily_steps_goal": 12000,
+        "daily_water_goal": 10,
+    }
+    r = requests.post(f"{API}/goals", json=set_payload, headers=auth_headers, timeout=30)
+    if r.status_code != 200:
+        record("POST /api/goals (set)", False, f"HTTP {r.status_code}: {r.text[:200]}")
+        return
+    body = r.json()
+    if not body.get("message"):
+        record("POST /api/goals (set)", False, f"no message in response: {body}")
+    else:
+        record("POST /api/goals (set)", True, body.get("message"))
+
+    # ---------- Step 4: GET /api/goals returns saved values ----------
+    r = requests.get(f"{API}/goals", headers=auth_headers, timeout=30)
+    if r.status_code != 200:
+        record("GET /api/goals (after set)", False, f"HTTP {r.status_code}: {r.text[:200]}")
+        return
+    g = r.json()
+    expected_set = {
+        "primary_goal": "build_muscle",
+        "target_weight_kg": 75.5,
+        "weekly_workout_days": 5,
+        "daily_steps_goal": 12000,
+        "daily_water_goal": 10,
+        "is_set": True,
+    }
+    mismatches = []
+    for k, v in expected_set.items():
+        if g.get(k) != v:
+            mismatches.append(f"{k} expected={v!r} got={g.get(k)!r}")
+    if mismatches:
+        record("GET /api/goals (after set)", False, "; ".join(mismatches))
+    else:
+        record("GET /api/goals (after set)", True, json.dumps(g))
+
+    # ---------- Step 5: GET /api/auth/me reflects synced fields ----------
+    r = requests.get(f"{API}/auth/me", headers=auth_headers, timeout=30)
+    if r.status_code != 200:
+        record("GET /api/auth/me (synced)", False, f"HTTP {r.status_code}: {r.text[:200]}")
+        return
+    me = r.json()
+    me_mismatches = []
+    if me.get("fitness_goal") != "build_muscle":
+        me_mismatches.append(f"fitness_goal expected='build_muscle' got={me.get('fitness_goal')!r}")
+    if me.get("goal_weight_kg") != 75.5:
+        me_mismatches.append(f"goal_weight_kg expected=75.5 got={me.get('goal_weight_kg')!r}")
+    if me_mismatches:
+        record("GET /api/auth/me (synced)", False, "; ".join(me_mismatches))
+    else:
+        record("GET /api/auth/me (synced)", True,
+               f"fitness_goal={me.get('fitness_goal')} goal_weight_kg={me.get('goal_weight_kg')}")
+
+    # ---------- Step 6: POST /api/goals partial update ----------
+    r = requests.post(f"{API}/goals", json={"primary_goal": "stay_fit"}, headers=auth_headers, timeout=30)
+    if r.status_code != 200:
+        record("POST /api/goals (partial upsert)", False, f"HTTP {r.status_code}: {r.text[:200]}")
+        return
+    record("POST /api/goals (partial upsert)", True, r.json().get("message", ""))
+
+    r = requests.get(f"{API}/goals", headers=auth_headers, timeout=30)
+    if r.status_code != 200:
+        record("GET /api/goals (after partial)", False, f"HTTP {r.status_code}: {r.text[:200]}")
+        return
+    g = r.json()
+    expected_partial = {
+        "primary_goal": "stay_fit",
+        "weekly_workout_days": 3,
+        "daily_steps_goal": 10000,
+        "daily_water_goal": 8,
+        "is_set": True,
+    }
+    partial_mismatches = []
+    for k, v in expected_partial.items():
+        if g.get(k) != v:
+            partial_mismatches.append(f"{k} expected={v!r} got={g.get(k)!r}")
+    if partial_mismatches:
+        record("GET /api/goals (after partial)", False, "; ".join(partial_mismatches))
+    else:
+        record("GET /api/goals (after partial)", True, json.dumps(g))
+
+    # ---------- Step 7: GET /api/goals without auth ----------
+    r = requests.get(f"{API}/goals", timeout=30)
+    if r.status_code in (401, 403):
+        record("GET /api/goals (no auth)", True, f"HTTP {r.status_code}")
+    else:
+        record("GET /api/goals (no auth)", False, f"expected 401/403, got HTTP {r.status_code}: {r.text[:200]}")
+
+    # Save credentials for handoff
+    Path("/app/memory").mkdir(parents=True, exist_ok=True)
+    Path("/app/memory/test_credentials.md").write_text(
+        f"""# Test Credentials
+
+Last test user used by goals endpoint tests:
+
+- email: `{email}`
+- password: `{password}`
+- name: Sarah Morgan
+- age: 29, gender: female, height: 168cm, weight: 82.4kg
+- generated by: /app/backend_test.py
+- backend base: {API}
+"""
+    )
+
+    # ---------- Summary ----------
+    failed = [r for r in results if not r[1]]
+    print("\n========== SUMMARY ==========")
+    for n, ok, d in results:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {n}")
+    print(f"\nTotal: {len(results)} | Passed: {len(results) - len(failed)} | Failed: {len(failed)}")
+    sys.exit(0 if not failed else 1)
+
 
 if __name__ == "__main__":
-    tester = DietTrackerAPITester()
-    passed, failed = tester.run_all_tests()
-    
-    # Exit with non-zero code if any tests failed
-    exit(0 if failed == 0 else 1)
+    main()

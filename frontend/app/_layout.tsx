@@ -14,6 +14,10 @@ export default function RootLayout() {
         <Stack.Screen name="check-in" options={{ presentation: 'modal' }} />
         <Stack.Screen name="workout-tracker" options={{ presentation: 'card' }} />
         <Stack.Screen name="sleep-tracker" options={{ presentation: 'card' }} />
+        <Stack.Screen name="meal-logger" options={{ presentation: 'card' }} />
+        <Stack.Screen name="progress-photos" options={{ presentation: 'card' }} />
+        <Stack.Screen name="goal-selection" options={{ presentation: 'card' }} />
+        <Stack.Screen name="weekly-report" options={{ presentation: 'card' }} />
       </Stack>
     </AuthProvider>
   );
