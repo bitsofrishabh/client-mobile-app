@@ -72,7 +72,6 @@ class UserProfile(BaseModel):
     created_at: datetime
     coach_code: Optional[str] = None
     package_id: Optional[str] = None
-
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
     age: Optional[int] = None
@@ -286,6 +285,7 @@ async def get_me(user: dict = Depends(get_current_user)):
         weight_kg=user.get("weight_kg"),
         goal_weight_kg=user.get("goal_weight_kg"),
         activity_level=user.get("activity_level"),
+        fitness_goal=user.get("fitness_goal"),
         bmi=user.get("bmi"),
         daily_calorie_goal=user.get("daily_calorie_goal"),
         created_at=user["created_at"],
