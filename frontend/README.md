@@ -16,6 +16,23 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npx expo start
    ```
 
+## Local backend
+
+The app uses the local FastAPI server at `http://localhost:8000` by default.
+Start it from the repository root in another terminal:
+
+```bash
+cd backend
+.venv/bin/python -m uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+For Expo Go on a physical device, create `frontend/.env.local` with your
+computer's LAN address (not `localhost`), then restart Expo:
+
+```dotenv
+EXPO_PUBLIC_BACKEND_URL=http://192.168.x.x:8000
+```
+
 In the output, you'll find options to open the app in a
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)

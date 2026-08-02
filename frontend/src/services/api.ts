@@ -2,10 +2,12 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
-// Use local backend API
-const API_BASE_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL 
-  ? `${Constants.expoConfig.extra.EXPO_PUBLIC_BACKEND_URL}/api`
-  : 'https://meal-log-mobile.preview.emergentagent.com/api';
+// Use the local FastAPI server by default. Set EXPO_PUBLIC_BACKEND_URL when
+// running on a physical device (for example, http://192.168.1.10:8000).
+const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL
+  ?? Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL
+  ?? 'http://localhost:8000';
+const API_BASE_URL = `${backendUrl.replace(/\/$/, '')}/api`;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
